@@ -7,6 +7,7 @@ import HomeTab from './tabs/HomeTab.jsx';
 import ActivitiesTab from './tabs/ActivitiesTab.jsx';
 import ItineraryTab from './tabs/ItineraryTab.jsx';
 import MemoriesTab from './tabs/MemoriesTab.jsx';
+import { useMembers, useHotels, useActivities } from '../hooks/useDatabase.js';
 
 // Palette of colors for new attendees added dynamically
 const AVATAR_COLORS = ['#E91E63','#9C27B0','#3F51B5','#00BCD4','#FF5722','#795548','#607D8B','#FF9800'];
@@ -25,40 +26,37 @@ export default function Crewfare() {
   });
 
   const [activeTab, setActiveTab] = useState('home');
-  const [activities, setActivities] = useState(ACTIVITIES);
   const [itinerary, setItinerary] = useState(ITINERARY);
 
-  // ── Shared mutable state ──────────────────────────────────────────────────
-  const [hotels, setHotels] = useState(HOTELS);
-  const [members, setMembers] = useState(MEMBERS);
+  // ── Database-synchronized state ────────────────────────────────────────
+  const { members, addMember, updateMember } = useMembers();
+  const { hotels, updateHotel } = useHotels();
+  const { activities, updateActivity } = useActivities();
+
+  // ── Local UI state ─────────────────────────────────────────────────────
   const [currentUser, setCurrentUser] = useState('You');
 
   // Book a room: add attendee name to hotel.bookedBy and update/add member record
-  const handleBookRoom = (hotelId, userName) => {
+  const handleBookRoom = async (hotelId, userName) => {
     const name = (typeof userName === 'string' ? userName : '').trim() || currentUser;
-    const hotelName = HOTELS.find(h => h.id === hotelId)?.name || '';
+    const hotelName = (hotels.find(h => h.id === hotelId) || HOTELS.find(h => h.id === hotelId))?.name || '';
 
     console.log('[handleBookRoom] called with:', { hotelId, userName, resolvedName: name, hotelName });
 
-    // Update hotel's bookedBy list (no duplicates)
-    setHotels(prev => {
-      const updated = prev.map(h =>
-        h.id === hotelId && !h.bookedBy.includes(name)
-          ? { ...h, bookedBy: [...h.bookedBy, name] }
-          : h
-      );
-      console.log('[setHotels] bookedBy for', hotelId, '→', updated.find(h => h.id === hotelId)?.bookedBy);
-      return updated;
-    });
+    // Update hotel's bookedBy list (no duplicates) and save to database
+    const hotel = hotels.find(h => h.id === hotelId) || HOTELS.find(h => h.id === hotelId);
+    if (hotel && !hotel.bookedBy.includes(name)) {
+      await updateHotel(hotelId, { ...hotel, bookedBy: [...hotel.bookedBy, name] });
+      console.log('[handleBookRoom] hotel updated:', hotelId);
+    }
 
     // Add or update member — always run so Hotels tab booking also adds to crew list
-    setMembers(prev => {
-      if (prev.some(m => m.name === name)) {
-        const updated = prev.map(m => m.name === name ? { ...m, hotel: hotelName || m.hotel, confirmed: true } : m);
-        console.log('[setMembers] updated existing member:', name, '| total members:', updated.length);
-        return updated;
-      }
-      const colorIdx = prev.length % AVATAR_COLORS.length;
+    const existingMember = members.find(m => m.name === name);
+    if (existingMember) {
+      await updateMember(existingMember.id, { hotel: hotelName || existingMember.hotel, confirmed: true });
+      console.log('[handleBookRoom] member updated:', name);
+    } else {
+      const colorIdx = members.length % AVATAR_COLORS.length;
       const newMember = {
         id:       `m-${Date.now()}`,
         name,
@@ -68,24 +66,41 @@ export default function Crewfare() {
         hotel:    hotelName,
         confirmed: true,
       };
-      const updated = [...prev, newMember];
-      console.log('[setMembers] NEW member added:', newMember, '| total members:', updated.length);
-      return updated;
-    });
+      await addMember(newMember);
+      console.log('[handleBookRoom] NEW member added:', newMember);
+    }
   };
 
   // ── Activity actions ──────────────────────────────────────────────────────
   // Sort happens at render time — upvote/downvote just update counts
-  const handleUpvote = id => setActivities(acts =>
-    acts.map(a => a.id === id ? { ...a, upvotes: a.upvotes + 1, voters: a.voters.includes(currentUser) ? a.voters : [...a.voters, currentUser] } : a)
-  );
-  const handleDownvote = id => setActivities(acts =>
-    acts.map(a => a.id === id ? { ...a, downvotes: a.downvotes + 1 } : a)
-  );
-  const handleCommentAdd = (id, text) => setActivities(acts => acts.map(a =>
-    a.id === id ? { ...a, comments: [...a.comments, { user: currentUser, text, time: 'just now' }] } : a
-  ));
-  const handleBook = id => setActivities(acts => acts.map(a => a.id === id ? { ...a, booked: true } : a));
+  const handleUpvote = (id) => {
+    const activity = activities.find(a => a.id === id);
+    if (activity) {
+      const voters = activity.voters.includes(currentUser) ? activity.voters : [...activity.voters, currentUser];
+      updateActivity(id, { upvotes: activity.upvotes + 1, voters });
+    }
+  };
+
+  const handleDownvote = (id) => {
+    const activity = activities.find(a => a.id === id);
+    if (activity) {
+      updateActivity(id, { downvotes: activity.downvotes + 1 });
+    }
+  };
+
+  const handleCommentAdd = (id, text) => {
+    const activity = activities.find(a => a.id === id);
+    if (activity) {
+      updateActivity(id, { comments: [...activity.comments, { user: currentUser, text, time: 'just now' }] });
+    }
+  };
+
+  const handleBook = (id) => {
+    const activity = activities.find(a => a.id === id);
+    if (activity) {
+      updateActivity(id, { booked: true });
+    }
+  };
 
   // ── Itinerary actions ─────────────────────────────────────────────────────
   const handleAddEvent = (event) => {
@@ -98,47 +113,48 @@ export default function Crewfare() {
 
   if (view === 'landing') return <LandingPage onOrganizer={() => setView('organizer-onboarding')} onAttendee={() => setView('attendee-onboarding')} />;
 
-  if (view === 'organizer-onboarding') return <OrganizerOnboarding onComplete={(name) => {
+  if (view === 'organizer-onboarding') return <OrganizerOnboarding onComplete={async (name) => {
     if (name) {
       setCurrentUser(name);
       // Add organizer to members if not already present
-      setMembers(prev => prev.some(m => m.name === name) ? prev : [...prev, {
-        id: `m-org-${Date.now()}`, name,
-        initials: name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
-        color: AVATAR_COLORS[0], role: 'organizer', hotel: '', confirmed: true,
-      }]);
+      const exists = members.some(m => m.name === name);
+      if (!exists) {
+        await addMember({
+          id: `m-org-${Date.now()}`, name,
+          initials: name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
+          color: AVATAR_COLORS[0], role: 'organizer', hotel: '', confirmed: true,
+        });
+      }
     }
     setView('app');
   }} />;
 
-  if (view === 'attendee-onboarding') return <AttendeeOnboarding onComplete={(name, hotelId) => {
+  if (view === 'attendee-onboarding') return <AttendeeOnboarding onComplete={async (name, hotelId) => {
     const safeName = typeof name === 'string' ? name.trim() : '';
     console.log('[AttendeeOnboarding onComplete] name:', name, '| hotelId:', hotelId, '| safeName:', safeName);
     if (safeName) {
       setCurrentUser(safeName);
       // Always add the attendee to members, then optionally book a room
-      setMembers(prev => {
-        if (prev.some(m => m.name === safeName)) {
-          const hotelName = HOTELS.find(h => h.id === hotelId)?.name || '';
-          const updated = prev.map(m => m.name === safeName ? { ...m, hotel: hotelName || m.hotel, confirmed: true } : m);
-          console.log('[onComplete setMembers] updated existing:', safeName, '| total:', updated.length);
-          return updated;
-        }
-        const hotelName = HOTELS.find(h => h.id === hotelId)?.name || '';
-        const colorIdx = prev.length % AVATAR_COLORS.length;
+      const existingMember = members.find(m => m.name === safeName);
+      if (existingMember) {
+        const hotelName = (HOTELS.find(h => h.id === hotelId) || hotels.find(h => h.id === hotelId))?.name || '';
+        await updateMember(existingMember.id, { hotel: hotelName || existingMember.hotel, confirmed: true });
+        console.log('[onComplete] updated existing member:', safeName);
+      } else {
+        const hotelName = (HOTELS.find(h => h.id === hotelId) || hotels.find(h => h.id === hotelId))?.name || '';
+        const colorIdx = members.length % AVATAR_COLORS.length;
         const newMember = {
           id: `m-att-${Date.now()}`, name: safeName,
           initials: safeName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
           color: AVATAR_COLORS[colorIdx], role: 'attendee', hotel: hotelName, confirmed: true,
         };
-        const updated = [...prev, newMember];
-        console.log('[onComplete setMembers] NEW member added:', newMember, '| total:', updated.length);
-        return updated;
-      });
+        await addMember(newMember);
+        console.log('[onComplete] NEW member added:', newMember);
+      }
     } else {
       console.warn('[onComplete] safeName is empty — member NOT added. Raw name was:', name);
     }
-    if (hotelId && safeName) handleBookRoom(hotelId, safeName);
+    if (hotelId && safeName) await handleBookRoom(hotelId, safeName);
     setView('app');
   }} />;
 
