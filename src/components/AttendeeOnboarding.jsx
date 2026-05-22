@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { M, sans, serif, HOTELS, MEMBERS, TRIP } from '../constants.js';
+import { M, sans, serif, HOTELS, TRIP } from '../constants.js';
 import { PrimaryBtn, GhostBtn } from './shared.jsx';
 
 const STEPS = ['Welcome', 'Sign In', 'Your Room', 'Book Hotel', 'Flight Info', 'All Set!'];
@@ -35,19 +35,35 @@ const StepBar = ({ current }) => (
   </div>
 );
 
-export default function AttendeeOnboarding({ onComplete }) {
-  const [step, setStep] = useState(0);
-  const [form, setForm] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    signInMethod: '',
-    guests: [{ name: '', isChild: false, age: '' }],
-    hotel: null,
-    airline: '',
-    flightNum: '',
-    flightArrival: '',
-    flightDeparture: '',
+export default function AttendeeOnboarding({ onComplete, tripInfo: propTripInfo, hotels: propHotels, currentUser: propCurrentUser, startStep = 0 }) {
+  // Merge live props with TRIP/HOTELS fallbacks
+  const liveTripInfo = {
+    name: TRIP.name,
+    destination: TRIP.destination,
+    startDate: TRIP.startDate,
+    endDate: TRIP.endDate,
+    discountPct: TRIP.discountPct,
+    organizerName: '',
+    ...propTripInfo,
+  };
+  const liveHotels = propHotels && propHotels.length > 0 ? propHotels : HOTELS;
+
+  const [step, setStep] = useState(startStep);
+  const [form, setForm] = useState(() => {
+    const nameParts = (propCurrentUser || '').trim().split(' ');
+    return {
+      firstName: nameParts[0] || '',
+      lastName: nameParts.slice(1).join(' ') || '',
+      email: '',
+      signInMethod: propCurrentUser ? 'bonvoy' : '',
+      guests: [{ name: '', isChild: false, age: '' }],
+      hotel: null,
+      notFlying: false,
+      airline: '',
+      flightNum: '',
+      flightArrival: '',
+      flightDeparture: '',
+    };
   });
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -63,7 +79,7 @@ export default function AttendeeOnboarding({ onComplete }) {
   const next = () => setStep(s => Math.min(s + 1, STEPS.length - 1));
   const back = () => setStep(s => Math.max(s - 1, 0));
 
-  const bookedRooms = HOTELS.reduce((acc, h) => acc + h.bookedBy.length, 0);
+  const bookedRooms = liveHotels.reduce((acc, h) => acc + h.bookedBy.length, 0);
   const totalNeeded = TRIP.discountRooms;
 
   return (
@@ -74,7 +90,7 @@ export default function AttendeeOnboarding({ onComplete }) {
           <div style={{ width: 36, height: 36, borderRadius: 8, background: M.red, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: M.white, fontSize: 16 }}>M</div>
           <div>
             <div style={{ color: M.white, fontWeight: 700, fontSize: 16 }}>Marriott Bonvoy</div>
-            <div style={{ color: M.gray4, fontSize: 12 }}>Group Trip Planner</div>
+            <div style={{ color: M.gray4, fontSize: 12 }}>CoVoyage</div>
           </div>
           <div style={{ marginLeft: 'auto', background: 'rgba(0,107,107,0.3)', color: '#4dd', border: '1px solid rgba(0,200,200,0.4)', borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
             ATTENDEE
@@ -91,9 +107,9 @@ export default function AttendeeOnboarding({ onComplete }) {
               <h1 style={{ fontFamily: serif, fontSize: 28, color: M.black, marginBottom: 10 }}>You're Invited!</h1>
               <div style={{ display: 'inline-block', background: '#fff5f5', border: `1.5px solid #fdd`, borderRadius: 12, padding: '12px 20px', marginBottom: 20 }}>
                 <div style={{ fontSize: 12, color: M.gray5, marginBottom: 4 }}>Trip Organizer</div>
-                <div style={{ fontWeight: 700, color: M.black, fontSize: 15 }}>Sarah M.</div>
-                <div style={{ color: M.red, fontWeight: 700, fontSize: 17 }}>{TRIP.name}</div>
-                <div style={{ color: M.gray5, fontSize: 13 }}>{TRIP.destination} · {TRIP.startDate} – {TRIP.endDate}</div>
+                <div style={{ fontWeight: 700, color: M.black, fontSize: 15 }}>{liveTripInfo.organizerName || 'Your Organizer'}</div>
+                <div style={{ color: M.red, fontWeight: 700, fontSize: 17 }}>{liveTripInfo.name}</div>
+                <div style={{ color: M.gray5, fontSize: 13 }}>{liveTripInfo.destination} · {liveTripInfo.startDate} – {liveTripInfo.endDate}</div>
               </div>
               <p style={{ color: M.gray5, fontSize: 14, lineHeight: 1.7, marginBottom: 28, maxWidth: 400, margin: '0 auto 28px' }}>
                 Collaborate with your crew, book a room at the group hotel, add your flight details, and help plan the ultimate trip — together.
@@ -108,7 +124,7 @@ export default function AttendeeOnboarding({ onComplete }) {
                 <div style={{ background: M.gray2, borderRadius: 20, height: 8 }}>
                   <div style={{ width: `${Math.min((bookedRooms / totalNeeded) * 100, 100)}%`, height: '100%', background: `linear-gradient(90deg, ${M.red}, ${M.gold})`, borderRadius: 20, transition: 'width 0.6s' }} />
                 </div>
-                <div style={{ fontSize: 12, color: M.gray5, marginTop: 6 }}>Book {totalNeeded - bookedRooms} more rooms to unlock <strong style={{ color: M.red }}>{TRIP.discountPct}% off</strong> for everyone!</div>
+                <div style={{ fontSize: 12, color: M.gray5, marginTop: 6 }}>Book {totalNeeded - bookedRooms} more rooms to unlock <strong style={{ color: M.red }}>{liveTripInfo.discountPct}% off</strong> for everyone!</div>
               </div>
 
               <PrimaryBtn onClick={next}>Get Started →</PrimaryBtn>
@@ -119,40 +135,44 @@ export default function AttendeeOnboarding({ onComplete }) {
           {step === 1 && (
             <div>
               <h2 style={{ fontFamily: serif, fontSize: 24, color: M.black, marginBottom: 6 }}>Sign In to Join</h2>
-              <p style={{ color: M.gray5, marginBottom: 24, fontSize: 14 }}>Sign in with Marriott Bonvoy to earn points on your booking.</p>
+              <p style={{ color: M.gray5, marginBottom: 24, fontSize: 14 }}>Sign in to earn Bonvoy points on your booking and save your trip details.</p>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-                {[
-                  { id: 'bonvoy', label: '🏨 Continue with Marriott Bonvoy', color: M.red, text: M.white },
-                  { id: 'google', label: '🔵 Continue with Google',          color: M.white, text: M.black, border: M.gray3 },
-                  { id: 'apple',  label: '🍎 Continue with Apple',           color: M.black, text: M.white },
-                ].map(btn => (
-                  <button
-                    key={btn.id}
-                    onClick={() => { set('signInMethod', btn.id); }}
-                    style={{
-                      padding: '13px 20px', borderRadius: 10, border: `1.5px solid ${btn.border || 'transparent'}`,
-                      background: form.signInMethod === btn.id ? (btn.id === 'bonvoy' ? M.redDark : btn.color) : btn.color,
-                      color: btn.text, fontFamily: sans, fontSize: 15, fontWeight: 600, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, transition: 'all 0.2s',
-                      outline: form.signInMethod === btn.id ? `2px solid ${M.gold}` : 'none',
-                    }}
-                  >
-                    {btn.label}
-                    {form.signInMethod === btn.id && <span>✓</span>}
-                  </button>
-                ))}
-              </div>
+              <button
+                onClick={() => set('signInMethod', 'bonvoy')}
+                style={{
+                  width: '100%', padding: '16px 20px', borderRadius: 12, border: `2px solid ${form.signInMethod === 'bonvoy' ? M.red : 'transparent'}`,
+                  background: M.red, color: M.white, fontFamily: sans, fontSize: 15, fontWeight: 700,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 12, transition: 'all 0.2s',
+                  outline: form.signInMethod === 'bonvoy' ? `3px solid ${M.gold}` : 'none',
+                  boxShadow: '0 4px 16px rgba(168,38,42,0.4)',
+                }}
+              >
+                <div style={{ width: 26, height: 26, borderRadius: 6, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 13 }}>M</div>
+                Sign in with Marriott Bonvoy
+                {form.signInMethod === 'bonvoy' && <span style={{ marginLeft: 'auto' }}>✓</span>}
+              </button>
+
+              <button
+                onClick={() => set('signInMethod', 'other')}
+                style={{
+                  width: '100%', padding: '13px 20px', borderRadius: 10, border: `1.5px solid ${form.signInMethod === 'other' ? M.red : M.gray3}`,
+                  background: M.white, color: M.gray5, fontFamily: sans, fontSize: 14, fontWeight: 600,
+                  cursor: 'pointer', marginBottom: 24, transition: 'all 0.2s',
+                }}
+              >
+                Sign in Another Way
+                {form.signInMethod === 'other' && <span style={{ marginLeft: 8, color: M.red }}>✓</span>}
+              </button>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 8 }}>
                 <Input label="First Name" value={form.firstName} onChange={v => set('firstName', v)} required half />
-                <Input label="Last Name" value={form.lastName} onChange={v => set('lastName', v)} required half />
+                <Input label="Last Name" value={form.lastName} onChange={v => set('lastName', v)} half />
               </div>
               <Input label="Email" type="email" value={form.email} onChange={v => set('email', v)} placeholder="you@example.com" required />
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
                 <GhostBtn onClick={back}>Back</GhostBtn>
-                <PrimaryBtn onClick={next} disabled={!form.firstName || !form.lastName || !form.email || !form.signInMethod}>Continue →</PrimaryBtn>
+                <PrimaryBtn onClick={next} disabled={!form.firstName || !form.signInMethod || (form.signInMethod !== 'bonvoy' && !form.email)}>Continue →</PrimaryBtn>
               </div>
             </div>
           )}
@@ -216,30 +236,21 @@ export default function AttendeeOnboarding({ onComplete }) {
           {step === 3 && (
             <div>
               <h2 style={{ fontFamily: serif, fontSize: 24, color: M.black, marginBottom: 4 }}>Book Your Room</h2>
-              <p style={{ color: M.gray5, marginBottom: 6, fontSize: 14 }}>Dates: <strong>{TRIP.startDate} – {TRIP.endDate}</strong> (set by organizer)</p>
+              <p style={{ color: M.gray5, marginBottom: 6, fontSize: 14 }}>Dates: <strong>{liveTripInfo.startDate} – {liveTripInfo.endDate}</strong> (set by organizer)</p>
 
               {/* Group Discount Bar */}
               <div style={{ background: '#fff5f5', border: `1px solid #fdd`, borderRadius: 10, padding: '10px 14px', marginBottom: 20, fontSize: 13 }}>
                 <strong style={{ color: M.red }}>🎁 {bookedRooms} of {totalNeeded} rooms booked</strong>
-                <span style={{ color: M.gray5 }}> — {totalNeeded - bookedRooms} more needed for {TRIP.discountPct}% group discount!</span>
+                <span style={{ color: M.gray5 }}> — {totalNeeded - bookedRooms} more needed for {liveTripInfo.discountPct}% group discount!</span>
               </div>
 
-              {/* Who booked where */}
+              {/* Who booked where — only show if there are real members */}
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: M.gray5, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Your Crew's Hotels</div>
-                {MEMBERS.filter(m => m.confirmed).map(m => (
-                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 13 }}>
-                    <div style={{ width: 28, height: 28, borderRadius: '50%', background: m.color, color: M.white, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{m.initials}</div>
-                    <span style={{ color: M.black, fontWeight: 600 }}>{m.name}</span>
-                    <span style={{ color: M.gray4 }}>→</span>
-                    <span style={{ color: M.gray5 }}>{m.hotel}</span>
-                    {m.role === 'organizer' && <span style={{ background: '#fff5f5', color: M.red, border: `1px solid #fdd`, borderRadius: 10, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>ORGANIZER</span>}
-                  </div>
-                ))}
+                <div style={{ fontSize: 13, fontWeight: 600, color: M.gray5, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Available Hotels</div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
-                {HOTELS.map(h => (
+                {liveHotels.map(h => (
                   <div
                     key={h.id}
                     onClick={() => set('hotel', h.id)}
@@ -269,9 +280,17 @@ export default function AttendeeOnboarding({ onComplete }) {
                   </div>
                 ))}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
-                <GhostBtn onClick={back}>Back</GhostBtn>
-                <PrimaryBtn onClick={next} disabled={!form.hotel}>Continue →</PrimaryBtn>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <GhostBtn onClick={back}>Back</GhostBtn>
+                  <PrimaryBtn onClick={next} disabled={!form.hotel}>Continue →</PrimaryBtn>
+                </div>
+                <button
+                  onClick={() => { set('hotel', null); next(); }}
+                  style={{ background: 'none', border: 'none', color: M.gray4, fontSize: 13, cursor: 'pointer', fontFamily: sans, textDecoration: 'underline', padding: 0 }}
+                >
+                  Skip for now — I'll book a room later
+                </button>
               </div>
             </div>
           )}
@@ -280,15 +299,23 @@ export default function AttendeeOnboarding({ onComplete }) {
           {step === 4 && (
             <div>
               <h2 style={{ fontFamily: serif, fontSize: 24, color: M.black, marginBottom: 6 }}>Your Travel Details</h2>
-              <p style={{ color: M.gray5, marginBottom: 24, fontSize: 14 }}>Share your arrival and departure info to help the group coordinate shuttles and plans.</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 8 }}>
-                <Input label="Airline" value={form.airline} onChange={v => set('airline', v)} placeholder="e.g. Delta" half />
-                <Input label="Flight #" value={form.flightNum} onChange={v => set('flightNum', v)} placeholder="e.g. DL 2204" half />
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                <Input label="Arrival Date & Time" type="datetime-local" value={form.flightArrival} onChange={v => set('flightArrival', v)} half />
-                <Input label="Departure Date & Time" type="datetime-local" value={form.flightDeparture} onChange={v => set('flightDeparture', v)} half />
-              </div>
+              <p style={{ color: M.gray5, marginBottom: 16, fontSize: 14 }}>Let others in your group know when you'll be arriving and departing for easier planning.</p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, cursor: 'pointer', fontSize: 14, color: M.black, fontFamily: sans, background: M.gray1, borderRadius: 10, padding: '12px 14px' }}>
+                <input type="checkbox" checked={form.notFlying} onChange={e => set('notFlying', e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer', accentColor: M.red }} />
+                <span>I will not be flying to the destination</span>
+              </label>
+              {!form.notFlying && (
+                <>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 8 }}>
+                    <Input label="Airline" value={form.airline} onChange={v => set('airline', v)} placeholder="e.g. Delta" half />
+                    <Input label="Flight #" value={form.flightNum} onChange={v => set('flightNum', v)} placeholder="e.g. DL 2204" half />
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                    <Input label="Arrival Date & Time" type="datetime-local" value={form.flightArrival} onChange={v => set('flightArrival', v)} half />
+                    <Input label="Departure Date & Time" type="datetime-local" value={form.flightDeparture} onChange={v => set('flightDeparture', v)} half />
+                  </div>
+                </>
+              )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8 }}>
                 <GhostBtn onClick={back}>Back</GhostBtn>
                 <PrimaryBtn onClick={next}>Continue →</PrimaryBtn>
@@ -302,13 +329,13 @@ export default function AttendeeOnboarding({ onComplete }) {
               <div style={{ fontSize: 52, marginBottom: 12 }}>🌴</div>
               <h2 style={{ fontFamily: serif, fontSize: 26, color: M.black, marginBottom: 8 }}>You're All Set, {form.firstName}!</h2>
               <p style={{ color: M.gray5, fontSize: 14, marginBottom: 24, maxWidth: 380, margin: '0 auto 24px' }}>
-                You've joined the <strong>{TRIP.name}</strong>. Head to the trip dashboard to explore activities, check the itinerary, and collaborate with your crew.
+                You've joined the <strong>{liveTripInfo.name}</strong>. Head to the trip dashboard to explore activities, check the itinerary, and collaborate with your crew.
               </p>
 
               {/* Confirmation summary */}
               <div style={{ background: M.gray1, borderRadius: 12, padding: 20, textAlign: 'left', marginBottom: 24 }}>
                 {[
-                  ['Hotel', HOTELS.find(h => h.id === form.hotel)?.name || '—'],
+                  ['Hotel', liveHotels.find(h => h.id === form.hotel)?.name || '—'],
                   ['Room Guests', form.guests.map(g => g.name || form.firstName).join(', ')],
                   ['Flight', form.airline && form.flightNum ? `${form.airline} ${form.flightNum}` : 'Not entered'],
                   ['Arrival', form.flightArrival ? form.flightArrival.replace('T', ' ') : 'Not entered'],

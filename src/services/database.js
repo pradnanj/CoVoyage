@@ -1,7 +1,14 @@
 // Hybrid Database: localStorage (immediate) + DynamoDB (optional)
 // Uses localStorage by default, switches to DynamoDB when AWS credentials are provided
 
-const USE_DYNAMODB = process.env.REACT_APP_AWS_ACCESS_KEY_ID && process.env.REACT_APP_AWS_SECRET_ACCESS_KEY;
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+
+const AWS_ACCESS_KEY_ID = import.meta.env.VITE_AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
+const AWS_REGION = import.meta.env.VITE_AWS_REGION || "us-east-1";
+
+const USE_DYNAMODB = AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DYNAMODB IMPLEMENTATION (when credentials are available)
@@ -11,14 +18,11 @@ let docClient = null;
 
 if (USE_DYNAMODB) {
   try {
-    const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-    const { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
-    
     const client = new DynamoDBClient({
-      region: process.env.REACT_APP_AWS_REGION || "us-east-1",
+      region: AWS_REGION,
       credentials: {
-        accessKeyId: process.env.REACT_APP_AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.REACT_APP_AWS_SECRET_ACCESS_KEY,
+        accessKeyId: AWS_ACCESS_KEY_ID,
+        secretAccessKey: AWS_SECRET_ACCESS_KEY,
       }
     });
     docClient = DynamoDBDocumentClient.from(client);
@@ -63,10 +67,9 @@ export const saveTrip = async (tripData) => {
     ...tripData,
     createdAt: new Date().toISOString(),
   };
-  
+
   if (USE_DYNAMODB && docClient) {
     try {
-      const { PutCommand } = require("@aws-sdk/lib-dynamodb");
       await docClient.send(new PutCommand({ TableName: "CrewfareTrips", Item: trip }));
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error);
@@ -81,7 +84,6 @@ export const saveTrip = async (tripData) => {
 export const getTrip = async (tripId) => {
   if (USE_DYNAMODB && docClient) {
     try {
-      const { GetCommand } = require("@aws-sdk/lib-dynamodb");
       const response = await docClient.send(new GetCommand({ TableName: "CrewfareTrips", Key: { tripId } }));
       return response.Item;
     } catch (error) {
@@ -100,10 +102,9 @@ export const saveMember = async (tripId, memberData) => {
     ...memberData,
     createdAt: new Date().toISOString(),
   };
-  
+
   if (USE_DYNAMODB && docClient) {
     try {
-      const { PutCommand } = require("@aws-sdk/lib-dynamodb");
       await docClient.send(new PutCommand({ TableName: "CrewfareMembers", Item: member }));
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error);
@@ -118,7 +119,6 @@ export const saveMember = async (tripId, memberData) => {
 export const getMembers = async (tripId) => {
   if (USE_DYNAMODB && docClient) {
     try {
-      const { QueryCommand } = require("@aws-sdk/lib-dynamodb");
       const response = await docClient.send(new QueryCommand({
         TableName: "CrewfareMembers",
         KeyConditionExpression: "tripId = :tripId",
@@ -141,10 +141,9 @@ export const saveHotel = async (tripId, hotelData) => {
     ...hotelData,
     createdAt: new Date().toISOString(),
   };
-  
+
   if (USE_DYNAMODB && docClient) {
     try {
-      const { PutCommand } = require("@aws-sdk/lib-dynamodb");
       await docClient.send(new PutCommand({ TableName: "CrewfareHotels", Item: hotel }));
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error);
@@ -159,7 +158,6 @@ export const saveHotel = async (tripId, hotelData) => {
 export const getHotels = async (tripId) => {
   if (USE_DYNAMODB && docClient) {
     try {
-      const { QueryCommand } = require("@aws-sdk/lib-dynamodb");
       const response = await docClient.send(new QueryCommand({
         TableName: "CrewfareHotels",
         KeyConditionExpression: "tripId = :tripId",
@@ -182,10 +180,9 @@ export const saveActivity = async (tripId, activityData) => {
     ...activityData,
     createdAt: new Date().toISOString(),
   };
-  
+
   if (USE_DYNAMODB && docClient) {
     try {
-      const { PutCommand } = require("@aws-sdk/lib-dynamodb");
       await docClient.send(new PutCommand({ TableName: "CrewfareActivities", Item: activity }));
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error);
@@ -200,7 +197,6 @@ export const saveActivity = async (tripId, activityData) => {
 export const getActivities = async (tripId) => {
   if (USE_DYNAMODB && docClient) {
     try {
-      const { QueryCommand } = require("@aws-sdk/lib-dynamodb");
       const response = await docClient.send(new QueryCommand({
         TableName: "CrewfareActivities",
         KeyConditionExpression: "tripId = :tripId",

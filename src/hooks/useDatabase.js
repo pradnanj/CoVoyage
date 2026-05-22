@@ -7,7 +7,7 @@ import {
 } from '../services/database';
 import { MEMBERS, HOTELS, ACTIVITIES } from '../constants';
 
-const TRIP_ID = process.env.REACT_APP_TRIP_ID || 'trip-orlando-2026';
+const TRIP_ID = import.meta.env.VITE_TRIP_ID || 'trip-orlando-2026';
 
 // ───── HOOK: Use Members with Database Sync ────────────────────
 // Falls back to mock MEMBERS data if database is empty
@@ -68,8 +68,13 @@ export const useHotels = () => {
     const loadHotels = async () => {
       try {
         const data = await getHotels(TRIP_ID);
-        // Use database data if available, otherwise use mock HOTELS
-        setHotels(data.length > 0 ? data : HOTELS);
+        // Always start from the full HOTELS list and merge in any saved data
+        // so hotels that haven't been explicitly saved still appear
+        const merged = HOTELS.map(h => {
+          const saved = data.find(d => d.id === h.id);
+          return saved ? { ...h, ...saved, bookedBy: saved.bookedBy || [] } : h;
+        });
+        setHotels(merged);
       } catch (error) {
         console.warn('Failed to load hotels, using defaults:', error);
         setHotels(HOTELS);
@@ -117,6 +122,17 @@ export const useActivities = () => {
     loadActivities();
   }, []);
 
+  const addActivity = useCallback(async (activityData) => {
+    try {
+      const saved = await saveActivity(TRIP_ID, activityData);
+      setActivities(prev => [...prev, saved]);
+      return saved;
+    } catch (error) {
+      console.error('Failed to add activity:', error);
+      setActivities(prev => [...prev, activityData]);
+    }
+  }, []);
+
   const updateActivity = useCallback(async (activityId, updates) => {
     try {
       const updated = { id: activityId, ...updates };
@@ -129,5 +145,5 @@ export const useActivities = () => {
     }
   }, []);
 
-  return { activities, loading, updateActivity };
+  return { activities, loading, addActivity, updateActivity };
 };

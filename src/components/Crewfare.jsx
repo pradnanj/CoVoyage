@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { M, sans, serif, TABS, ACTIVITIES, ITINERARY, HOTELS, MEMBERS, BUDGET_ITEMS, REWARDS, TRIP, MOCK_PHOTOS } from '../constants.js';
+import { M, sans, serif, TABS, ITINERARY, HOTELS, MEMBERS, TRIP, MOCK_PHOTOS } from '../constants.js';
 import { Av, SectionTitle, Tag, Card, PrimaryBtn, GhostBtn } from './shared.jsx';
 import OrganizerOnboarding from './OrganizerOnboarding.jsx';
 import AttendeeOnboarding from './AttendeeOnboarding.jsx';
@@ -14,27 +14,56 @@ const AVATAR_COLORS = ['#E91E63','#9C27B0','#3F51B5','#00BCD4','#FF5722','#79554
 
 // ─── App-level state & routing ────────────────────────────────────────────────
 export default function Crewfare() {
-  // Determine initial view from URL params
   const params = new URLSearchParams(window.location.search);
   const isAttendeeLink = params.has('trip') && params.has('ref');
   const skipOnboarding = params.get('skip') === '1';
 
+  // Restore session from sessionStorage
+  const savedUser = sessionStorage.getItem('crewfare_user');
+  const savedView = sessionStorage.getItem('crewfare_view');
+
+  // If no active session AND not joining via invite link, wipe stale localStorage data so we always start fresh
+  if (!savedUser && !isAttendeeLink) {
+    ['crewfare_members', 'crewfare_hotels', 'crewfare_activities', 'crewfare_trips', 'crewfare_itinerary'].forEach(k => localStorage.removeItem(k));
+    sessionStorage.removeItem('crewfare_trip');
+  }
+
   const [view, setView] = useState(() => {
-    if (skipOnboarding) return 'app';
-    if (isAttendeeLink) return 'attendee-onboarding';
+    if (skipOnboarding || (savedUser && savedView === 'app')) return 'app';
+    if (isAttendeeLink) return 'attendee-welcome';
     return 'landing';
   });
 
   const [activeTab, setActiveTab] = useState('home');
-  const [itinerary, setItinerary] = useState(ITINERARY);
+  const [pendingRole, setPendingRole] = useState(isAttendeeLink ? 'attendee' : 'organizer');
+  const [itinerary, setItinerary] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crewfare_itinerary');
+      return saved ? JSON.parse(saved) : ITINERARY;
+    } catch { return ITINERARY; }
+  });
 
-  // ── Database-synchronized state ────────────────────────────────────────
+  // Persist itinerary to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('crewfare_itinerary', JSON.stringify(itinerary));
+  }, [itinerary]);
+
+  // Trip info set by organizer during onboarding
+  const savedTrip = (() => { try { return JSON.parse(sessionStorage.getItem('crewfare_trip') || localStorage.getItem('crewfare_trip') || 'null'); } catch { return null; } })();
+  const [tripInfo, setTripInfo] = useState(savedTrip || {
+    name: TRIP.name,
+    destination: TRIP.destination,
+    startDate: TRIP.startDate,
+    endDate: TRIP.endDate,
+    startISO: TRIP.startISO,
+    endISO: TRIP.endISO,
+  });
+
   const { members, addMember, updateMember } = useMembers();
   const { hotels, updateHotel } = useHotels();
-  const { activities, updateActivity } = useActivities();
+  const { activities, addActivity, updateActivity } = useActivities();
 
-  // ── Local UI state ─────────────────────────────────────────────────────
-  const [currentUser, setCurrentUser] = useState('You');
+  const [currentUser, setCurrentUser] = useState(savedUser || '');
 
   // Book a room: add attendee name to hotel.bookedBy and update/add member record
   const handleBookRoom = async (hotelId, userName) => {
@@ -104,57 +133,121 @@ export default function Crewfare() {
 
   // ── Itinerary actions ─────────────────────────────────────────────────────
   const handleAddEvent = (event) => {
-    setItinerary(prev => prev.map(day =>
-      day.date === event.date
-        ? { ...day, items: [...day.items, { ...event, id: `custom-${Date.now()}` }] }
-        : day
-    ));
+    setItinerary(prev => {
+      const existing = prev.find(day => day.date === event.date);
+      const newItem = { ...event, id: `custom-${Date.now()}` };
+      if (existing) {
+        return prev.map(day =>
+          day.date === event.date
+            ? { ...day, items: [...day.items, newItem] }
+            : day
+        );
+      } else {
+        return [...prev, { date: event.date, items: [newItem] }];
+      }
+    });
   };
 
-  if (view === 'landing') return <LandingPage onOrganizer={() => setView('organizer-onboarding')} onAttendee={() => setView('attendee-onboarding')} />;
+  if (view === 'landing') return <LandingPage
+    onOrganizer={() => { setPendingRole('organizer'); setView('marriott-login'); }}
+    onAttendee={() => { setPendingRole('attendee'); setView('marriott-login'); }}
+  />;
 
-  if (view === 'organizer-onboarding') return <OrganizerOnboarding onComplete={async (name) => {
+  if (view === 'marriott-login') return <MarriottLoginPage
+    onSignIn={(name) => {
+      setCurrentUser(name);
+      sessionStorage.setItem('crewfare_user', name);
+      setView(pendingRole === 'attendee' ? 'attendee-onboarding' : 'organizer-onboarding');
+    }}
+    onEnroll={(name) => {
+      if (name) { setCurrentUser(name); sessionStorage.setItem('crewfare_user', name); }
+      setView(pendingRole === 'attendee' ? 'attendee-onboarding' : 'organizer-onboarding');
+    }}
+    onBack={() => setView('landing')}
+  />;
+
+  if (view === 'choose-role') return <ChooseRolePage
+    onOrganizer={() => setView('organizer-onboarding')}
+    onAttendee={() => setView('attendee-onboarding')}
+    onBack={() => setView('landing')}
+  />;
+
+  if (view === 'organizer-onboarding') return <OrganizerOnboarding onComplete={async (name, hotelId, form) => {
     if (name) {
       setCurrentUser(name);
-      // Add organizer to members if not already present
-      const exists = members.some(m => m.name === name);
-      if (!exists) {
-        await addMember({
-          id: `m-org-${Date.now()}`, name,
-          initials: name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
-          color: AVATAR_COLORS[0], role: 'organizer', hotel: '', confirmed: true,
-        });
+      sessionStorage.setItem('crewfare_user', name);
+      sessionStorage.setItem('crewfare_view', 'app');
+      ['crewfare_members','crewfare_hotels','crewfare_activities'].forEach(k => localStorage.removeItem(k));
+
+      // Save trip info from organizer's form
+      const hotelName = HOTELS.find(h => h.id === hotelId)?.name || '';
+      const startISO = form?.startDate || TRIP.startISO;
+      const endISO = form?.endDate || TRIP.endISO;
+      const formatDate = (iso) => {
+        const d = new Date(iso + 'T00:00:00');
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      };
+      const newTripInfo = {
+        name: form?.tripName || name + "'s Trip",
+        destination: form?.destination || TRIP.destination,
+        startDate: form?.startDate ? formatDate(startISO) : TRIP.startDate,
+        endDate: form?.endDate ? formatDate(endISO) : TRIP.endDate,
+        startISO, endISO,
+        organizerName: name,
+      };
+      setTripInfo(newTripInfo);
+      sessionStorage.setItem('crewfare_trip', JSON.stringify(newTripInfo));
+      localStorage.setItem('crewfare_trip', JSON.stringify(newTripInfo));
+
+      // Add organizer as member with correct role
+      const orgMember = {
+        id: `m-org-${Date.now()}`, name,
+        initials: name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
+        color: AVATAR_COLORS[0], role: 'organizer', hotel: hotelName, confirmed: true,
+      };
+      await addMember(orgMember);
+
+      // Book hotel room directly — avoids race condition from calling handleBookRoom after addMember
+      if (hotelId) {
+        const hotel = HOTELS.find(h => h.id === hotelId);
+        if (hotel) {
+          await updateHotel(hotelId, { ...hotel, bookedBy: [name] });
+        }
       }
     }
     setView('app');
   }} />;
 
-  if (view === 'attendee-onboarding') return <AttendeeOnboarding onComplete={async (name, hotelId) => {
+  if (view === 'attendee-welcome') return <AttendeeWelcomePage
+    tripInfo={tripInfo}
+    hotels={hotels}
+    onGetStarted={() => { setPendingRole('attendee'); setView('marriott-login'); }}
+  />;
+
+  if (view === 'attendee-onboarding') return <AttendeeOnboarding startStep={1} tripInfo={tripInfo} hotels={hotels} currentUser={currentUser} onComplete={async (name, hotelId) => {
     const safeName = typeof name === 'string' ? name.trim() : '';
-    console.log('[AttendeeOnboarding onComplete] name:', name, '| hotelId:', hotelId, '| safeName:', safeName);
-    if (safeName) {
-      setCurrentUser(safeName);
-      // Always add the attendee to members, then optionally book a room
-      const existingMember = members.find(m => m.name === safeName);
-      if (existingMember) {
-        const hotelName = (HOTELS.find(h => h.id === hotelId) || hotels.find(h => h.id === hotelId))?.name || '';
-        await updateMember(existingMember.id, { hotel: hotelName || existingMember.hotel, confirmed: true });
-        console.log('[onComplete] updated existing member:', safeName);
-      } else {
-        const hotelName = (HOTELS.find(h => h.id === hotelId) || hotels.find(h => h.id === hotelId))?.name || '';
-        const colorIdx = members.length % AVATAR_COLORS.length;
-        const newMember = {
-          id: `m-att-${Date.now()}`, name: safeName,
-          initials: safeName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
-          color: AVATAR_COLORS[colorIdx], role: 'attendee', hotel: hotelName, confirmed: true,
-        };
-        await addMember(newMember);
-        console.log('[onComplete] NEW member added:', newMember);
+    try {
+      if (safeName) {
+        setCurrentUser(safeName);
+        sessionStorage.setItem('crewfare_user', safeName);
+        sessionStorage.setItem('crewfare_view', 'app');
+        if (hotelId) {
+          await handleBookRoom(hotelId, safeName);
+        } else {
+          const existingMember = members.find(m => m.name === safeName);
+          if (!existingMember) {
+            const colorIdx = members.length % AVATAR_COLORS.length;
+            await addMember({
+              id: `m-att-${Date.now()}`, name: safeName,
+              initials: safeName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
+              color: AVATAR_COLORS[colorIdx], role: 'attendee', hotel: '', confirmed: true,
+            });
+          }
+        }
       }
-    } else {
-      console.warn('[onComplete] safeName is empty — member NOT added. Raw name was:', name);
+    } catch (err) {
+      console.error('[attendee onComplete] error:', err);
     }
-    if (hotelId && safeName) await handleBookRoom(hotelId, safeName);
     setView('app');
   }} />;
 
@@ -167,8 +260,8 @@ export default function Crewfare() {
         <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px 8px', gap: 10 }}>
           <div style={{ width: 32, height: 32, borderRadius: 8, background: M.red, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: M.white, fontSize: 15 }}>M</div>
           <div style={{ flex: 1 }}>
-            <div style={{ color: M.white, fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>{TRIP.name}</div>
-            <div style={{ color: M.gray4, fontSize: 11 }}>📍 {TRIP.destination} · {TRIP.startDate} – {TRIP.endDate}</div>
+            <div style={{ color: M.white, fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>{tripInfo.name || TRIP.name}</div>
+            <div style={{ color: M.gray4, fontSize: 11 }}>📍 {tripInfo.destination || TRIP.destination} · {tripInfo.startDate || TRIP.startDate} – {tripInfo.endDate || TRIP.endDate}</div>
           </div>
           <div style={{ display: 'flex', gap: 4 }}>
             {members.slice(0, 4).map(m => <Av key={m.id} name={m.name} color={m.color} size={28} />)}
@@ -203,6 +296,7 @@ export default function Crewfare() {
             activities={activities}
             hotels={hotels}
             members={members}
+            tripInfo={tripInfo}
             onUpvote={handleUpvote}
             onDownvote={handleDownvote}
             onCommentAdd={handleCommentAdd}
@@ -212,22 +306,25 @@ export default function Crewfare() {
         {activeTab === 'activities' && (
           <ActivitiesTab
             activities={activities}
+            currentUser={currentUser}
             onUpvote={handleUpvote}
             onDownvote={handleDownvote}
             onCommentAdd={handleCommentAdd}
             onBook={handleBook}
+            onAddActivity={addActivity}
           />
         )}
         {activeTab === 'itinerary' && (
           <ItineraryTab
             itinerary={itinerary}
             members={members}
+            tripInfo={tripInfo}
             onAddEvent={handleAddEvent}
           />
         )}
-        {activeTab === 'budget' && <BudgetTab />}
-        {activeTab === 'memories' && <MemoriesTab photos={MOCK_PHOTOS} />}
-        {activeTab === 'invite' && <InviteTab members={members} />}
+        {activeTab === 'expenses' && <ExpenseTab members={members} currentUser={currentUser} tripInfo={tripInfo} />}
+        {activeTab === 'memories' && <MemoriesTab photos={MOCK_PHOTOS} tripInfo={tripInfo} />}
+        {activeTab === 'invite' && <InviteTab members={members} tripInfo={tripInfo} />}
       </div>
     </div>
   );
@@ -240,28 +337,28 @@ function LandingPage({ onOrganizer, onAttendee }) {
       <div style={{ textAlign: 'center', maxWidth: 480 }}>
         <div style={{ width: 64, height: 64, borderRadius: 16, background: M.red, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', fontSize: 32, fontWeight: 900, color: M.white, boxShadow: '0 8px 32px rgba(168,38,42,0.6)' }}>M</div>
         <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', marginBottom: 10 }}>Marriott Bonvoy</div>
-        <h1 style={{ fontFamily: serif, fontSize: 38, color: M.white, fontWeight: 400, marginBottom: 12, lineHeight: 1.2 }}>Group Trip Planner</h1>
-        <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 16, lineHeight: 1.7, marginBottom: 44 }}>Plan, collaborate, and book your group adventure — all in one beautiful microsite.</p>
+        <h1 style={{ fontFamily: serif, fontSize: 38, color: M.white, fontWeight: 400, marginBottom: 12, lineHeight: 1.2 }}>CoVoyage</h1>
+        <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 16, lineHeight: 1.7, marginBottom: 44 }}>Plan, Collaborate, Explore, and Book Your Adventure—All in One Place</p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <button
             onClick={onOrganizer}
-            style={{ background: M.red, color: M.white, border: 'none', borderRadius: 12, padding: '18px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer', fontFamily: sans, transition: 'all 0.2s', boxShadow: '0 4px 20px rgba(168,38,42,0.5)' }}
+            style={{ background: M.red, color: M.white, border: 'none', borderRadius: 12, padding: '20px 32px', fontSize: 17, fontWeight: 700, cursor: 'pointer', fontFamily: sans, transition: 'all 0.2s', boxShadow: '0 4px 24px rgba(168,38,42,0.6)' }}
             onMouseEnter={e => { e.currentTarget.style.background = M.redDark; e.currentTarget.style.transform = 'translateY(-2px)'; }}
             onMouseLeave={e => { e.currentTarget.style.background = M.red; e.currentTarget.style.transform = 'translateY(0)'; }}
           >
             🗺 I'm Planning a Trip
-            <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8, marginTop: 2 }}>Create a microsite & invite your crew</div>
+            <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8, marginTop: 4 }}>Create a microsite & invite your crew</div>
           </button>
 
           <button
             onClick={onAttendee}
-            style={{ background: 'rgba(255,255,255,0.1)', color: M.white, border: '2px solid rgba(255,255,255,0.2)', borderRadius: 12, padding: '18px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer', fontFamily: sans, transition: 'all 0.2s', backdropFilter: 'blur(10px)' }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.18)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+            style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1.5px solid rgba(255,255,255,0.2)', borderRadius: 12, padding: '20px 32px', fontSize: 17, fontWeight: 700, cursor: 'pointer', fontFamily: sans, transition: 'all 0.2s' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.14)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
           >
             ✈️ I Was Invited to a Trip
-            <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8, marginTop: 2 }}>Join the group microsite</div>
+            <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.75, marginTop: 4 }}>Join the group microsite</div>
           </button>
         </div>
 
@@ -272,6 +369,191 @@ function LandingPage({ onOrganizer, onAttendee }) {
               {label}
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Attendee Welcome Page ────────────────────────────────────────────────────
+function AttendeeWelcomePage({ tripInfo = {}, hotels = [], onGetStarted }) {
+  const liveInfo = {
+    name: TRIP.name, destination: TRIP.destination,
+    startDate: TRIP.startDate, endDate: TRIP.endDate,
+    discountPct: TRIP.discountPct, organizerName: '',
+    ...tripInfo,
+  };
+  const bookedRooms = hotels.reduce((acc, h) => acc + (h.bookedBy?.length || 0), 0);
+  const totalNeeded = TRIP.discountRooms;
+  const STEPS = ['Welcome', 'Sign In', 'Your Room', 'Book Hotel', 'Flight Info', 'All Set!'];
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a3a5c 0%, #0d2340 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, fontFamily: sans }}>
+      <div style={{ width: '100%', maxWidth: 580, background: M.white, borderRadius: 20, boxShadow: '0 24px 80px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
+        {/* Header */}
+        <div style={{ background: M.black, padding: '20px 32px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: M.red, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: M.white, fontSize: 16 }}>M</div>
+          <div>
+            <div style={{ color: M.white, fontWeight: 700, fontSize: 16 }}>Marriott Bonvoy</div>
+            <div style={{ color: M.gray4, fontSize: 12 }}>CoVoyage</div>
+          </div>
+          <div style={{ marginLeft: 'auto', background: 'rgba(0,107,107,0.3)', color: '#4dd', border: '1px solid rgba(0,200,200,0.4)', borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
+            ATTENDEE
+          </div>
+        </div>
+
+        <div style={{ padding: '28px 36px' }}>
+          {/* Step bar */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {STEPS.map((_, i) => (
+                <div key={i} style={{ flex: 1, height: 4, borderRadius: 4, background: i === 0 ? M.red : M.gray2 }} />
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+              <span style={{ fontFamily: sans, fontSize: 12, color: M.gray4 }}>Step 1 of {STEPS.length}</span>
+              <span style={{ fontFamily: sans, fontSize: 12, color: M.red, fontWeight: 600 }}>Welcome</span>
+            </div>
+          </div>
+
+          <div style={{ textAlign: 'center', paddingTop: 8 }}>
+            <div style={{ fontSize: 52, marginBottom: 12 }}>🎡</div>
+            <h1 style={{ fontFamily: serif, fontSize: 28, color: M.black, marginBottom: 10 }}>You're Invited!</h1>
+            <div style={{ display: 'inline-block', background: '#fff5f5', border: '1.5px solid #fdd', borderRadius: 12, padding: '12px 20px', marginBottom: 20 }}>
+              <div style={{ fontSize: 12, color: M.gray5, marginBottom: 4 }}>Trip Organizer</div>
+              <div style={{ fontWeight: 700, color: M.black, fontSize: 15 }}>{liveInfo.organizerName || 'Your Organizer'}</div>
+              <div style={{ color: M.red, fontWeight: 700, fontSize: 17 }}>{liveInfo.name}</div>
+              <div style={{ color: M.gray5, fontSize: 13 }}>{liveInfo.destination} · {liveInfo.startDate} – {liveInfo.endDate}</div>
+            </div>
+            <p style={{ color: M.gray5, fontSize: 14, lineHeight: 1.7, maxWidth: 400, margin: '0 auto 28px' }}>
+              Collaborate with your crew, book a room at the group hotel, add your flight details, and help plan the ultimate trip — together.
+            </p>
+
+            {/* Group Discount Bar */}
+            <div style={{ background: M.gray1, borderRadius: 12, padding: '14px 18px', marginBottom: 28, textAlign: 'left' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: M.black }}>🎁 Group Discount Progress</span>
+                <span style={{ fontSize: 13, color: M.red, fontWeight: 700 }}>{bookedRooms}/{totalNeeded} rooms</span>
+              </div>
+              <div style={{ background: M.gray2, borderRadius: 20, height: 8 }}>
+                <div style={{ width: `${Math.min((bookedRooms / totalNeeded) * 100, 100)}%`, height: '100%', background: `linear-gradient(90deg, ${M.red}, ${M.gold})`, borderRadius: 20, transition: 'width 0.6s' }} />
+              </div>
+              <div style={{ fontSize: 12, color: M.gray5, marginTop: 6 }}>
+                Book {totalNeeded - bookedRooms} more rooms to unlock <strong style={{ color: M.red }}>{liveInfo.discountPct}% off</strong> for everyone!
+              </div>
+            </div>
+
+            <button
+              onClick={onGetStarted}
+              style={{ width: '100%', background: M.red, color: M.white, border: 'none', borderRadius: 10, padding: '14px', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: sans, boxShadow: '0 4px 16px rgba(168,38,42,0.4)' }}
+            >
+              Get Started →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Marriott Bonvoy Login Page ───────────────────────────────────────────────
+function MarriottLoginPage({ onSignIn, onEnroll, onBack }) {
+  const [tab, setTab] = useState('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [enrollName, setEnrollName] = useState('');
+  const [enrollEmail, setEnrollEmail] = useState('');
+  const [enrollPassword, setEnrollPassword] = useState('');
+
+  const handleSignIn = (e) => {
+    e.preventDefault();
+    const name = email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Guest';
+    onSignIn(name);
+  };
+
+  const handleEnroll = (e) => {
+    e.preventDefault();
+    onEnroll(enrollName);
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', background: `linear-gradient(160deg, ${M.black} 0%, #1a0505 60%, ${M.redDark} 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, fontFamily: sans }}>
+      <div style={{ width: '100%', maxWidth: 460, background: M.white, borderRadius: 20, boxShadow: '0 24px 80px rgba(0,0,0,0.4)', overflow: 'hidden' }}>
+        <div style={{ background: M.black, padding: '20px 28px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: M.red, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: M.white, fontSize: 16 }}>M</div>
+          <div>
+            <div style={{ color: M.white, fontWeight: 700, fontSize: 16 }}>Marriott Bonvoy</div>
+            <div style={{ color: M.gray4, fontSize: 12 }}>CoVoyage</div>
+          </div>
+          <button onClick={onBack} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: M.gray4, cursor: 'pointer', fontSize: 13 }}>← Back</button>
+        </div>
+
+        <div style={{ display: 'flex', borderBottom: `2px solid ${M.gray2}` }}>
+          {[['signin', 'Sign In'], ['enroll', 'Enroll']].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)} style={{ flex: 1, padding: '14px', background: 'none', border: 'none', borderBottom: `3px solid ${tab === id ? M.red : 'transparent'}`, marginBottom: -2, fontFamily: sans, fontSize: 14, fontWeight: tab === id ? 700 : 400, color: tab === id ? M.red : M.gray5, cursor: 'pointer' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ padding: '28px 32px' }}>
+          {tab === 'signin' ? (
+            <form onSubmit={handleSignIn}>
+              <div style={{ marginBottom: 18 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Email Address or Bonvoy Account #</label>
+                <input value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com or account number" required style={{ width: '100%', padding: '12px 14px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 15, outline: 'none' }} onFocus={e => (e.target.style.borderColor = M.red)} onBlur={e => (e.target.style.borderColor = M.gray3)} />
+              </div>
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Password</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter your password" required style={{ width: '100%', padding: '12px 14px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 15, outline: 'none' }} onFocus={e => (e.target.style.borderColor = M.red)} onBlur={e => (e.target.style.borderColor = M.gray3)} />
+              </div>
+              <button type="submit" style={{ width: '100%', background: M.red, color: M.white, border: 'none', borderRadius: 10, padding: '14px', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: sans }}>Sign In</button>
+              <p style={{ textAlign: 'center', marginTop: 14, fontSize: 13, color: M.gray4 }}>
+                Not a member?{' '}
+                <button type="button" onClick={() => setTab('enroll')} style={{ background: 'none', border: 'none', color: M.red, fontWeight: 600, cursor: 'pointer', fontFamily: sans, fontSize: 13 }}>Enroll in Marriott Bonvoy →</button>
+              </p>
+            </form>
+          ) : (
+            <form onSubmit={handleEnroll}>
+              <p style={{ color: M.gray5, fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>Join Marriott Bonvoy to earn points, unlock exclusive rates, and enjoy member benefits on every stay.</p>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Full Name</label>
+                <input value={enrollName} onChange={e => setEnrollName(e.target.value)} placeholder="Your full name" required style={{ width: '100%', padding: '12px 14px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 15, outline: 'none' }} onFocus={e => (e.target.style.borderColor = M.red)} onBlur={e => (e.target.style.borderColor = M.gray3)} />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Email Address</label>
+                <input type="email" value={enrollEmail} onChange={e => setEnrollEmail(e.target.value)} placeholder="email@example.com" required style={{ width: '100%', padding: '12px 14px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 15, outline: 'none' }} onFocus={e => (e.target.style.borderColor = M.red)} onBlur={e => (e.target.style.borderColor = M.gray3)} />
+              </div>
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Create Password</label>
+                <input type="password" value={enrollPassword} onChange={e => setEnrollPassword(e.target.value)} placeholder="Create a password" required style={{ width: '100%', padding: '12px 14px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 15, outline: 'none' }} onFocus={e => (e.target.style.borderColor = M.red)} onBlur={e => (e.target.style.borderColor = M.gray3)} />
+              </div>
+              <button type="submit" style={{ width: '100%', background: M.red, color: M.white, border: 'none', borderRadius: 10, padding: '14px', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: sans }}>Create Account & Join</button>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Choose Role Page ─────────────────────────────────────────────────────────
+function ChooseRolePage({ onOrganizer, onAttendee, onBack }) {
+  return (
+    <div style={{ minHeight: '100vh', background: `linear-gradient(160deg, ${M.black} 0%, #1a0505 40%, ${M.redDark} 100%)`, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, fontFamily: sans }}>
+      <div style={{ textAlign: 'center', maxWidth: 480 }}>
+        <h2 style={{ fontFamily: serif, fontSize: 28, color: M.white, fontWeight: 400, marginBottom: 10 }}>How are you joining?</h2>
+        <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 36 }}>Select your role to get started.</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <button onClick={onOrganizer} style={{ background: M.red, color: M.white, border: 'none', borderRadius: 12, padding: '18px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer', fontFamily: sans }}>
+            🗺 I'm Planning a Trip
+            <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8, marginTop: 2 }}>Create a group trip & invite your crew</div>
+          </button>
+          <button onClick={onAttendee} style={{ background: 'rgba(255,255,255,0.1)', color: M.white, border: '2px solid rgba(255,255,255,0.2)', borderRadius: 12, padding: '18px 32px', fontSize: 16, fontWeight: 700, cursor: 'pointer', fontFamily: sans }}>
+            ✈️ I Was Invited to a Trip
+            <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8, marginTop: 2 }}>Join the group microsite</div>
+          </button>
+          <button onClick={onBack} style={{ background: 'none', color: 'rgba(255,255,255,0.5)', border: 'none', fontSize: 13, cursor: 'pointer', fontFamily: sans, marginTop: 4 }}>← Back</button>
         </div>
       </div>
     </div>
@@ -418,77 +700,213 @@ function HotelsTab({ hotels, members, onBookRoom, currentUser }) {
   );
 }
 
-// ─── Budget Tab ───────────────────────────────────────────────────────────────
-function BudgetTab() {
-  const total = BUDGET_ITEMS.reduce((s, b) => s + b.amount, 0);
-  const committed = BUDGET_ITEMS.filter(b => b.committed).reduce((s, b) => s + b.amount, 0);
-  const pct = Math.min((committed / total) * 100, 100);
+// ─── Expense Tracking Tab ─────────────────────────────────────────────────────
+function ExpenseTab({ members, currentUser, tripInfo = {} }) {
+  const [expenses, setExpenses] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ description: '', amount: '', paidBy: currentUser, splitWith: [], category: 'Activities' });
+  const CATEGORIES = ['Activities', 'Food & Drink', 'Transport', 'Shopping', 'Other'];
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const toggleSplit = (name) => {
+    setForm(f => ({
+      ...f,
+      splitWith: f.splitWith.includes(name)
+        ? f.splitWith.filter(n => n !== name)
+        : [...f.splitWith, name],
+    }));
+  };
+
+  const submitExpense = () => {
+    if (!form.description || !form.amount) return;
+    const expense = {
+      id: `exp-${Date.now()}`,
+      description: form.description,
+      amount: parseFloat(form.amount),
+      paidBy: form.paidBy || currentUser,
+      splitWith: form.splitWith,
+      category: form.category,
+      date: new Date().toLocaleDateString(),
+      settledBy: [],
+    };
+    setExpenses(prev => [...prev, expense]);
+    setForm({ description: '', amount: '', paidBy: currentUser, splitWith: [], category: 'Activities' });
+    setShowForm(false);
+  };
+
+  const markSettled = (expId, personName) => {
+    setExpenses(prev => prev.map(e =>
+      e.id === expId ? { ...e, settledBy: [...e.settledBy, personName] } : e
+    ));
+  };
+
+  // Calculate who owes whom
+  const balances = {};
+  members.forEach(m => { balances[m.name] = 0; });
+  expenses.forEach(exp => {
+    const people = exp.splitWith.length > 0 ? exp.splitWith : [];
+    if (people.length === 0) return;
+    const share = exp.amount / (people.length + 1);
+    people.forEach(person => {
+      if (person !== exp.paidBy) {
+        if (!balances[person]) balances[person] = 0;
+        if (!balances[exp.paidBy]) balances[exp.paidBy] = 0;
+        const settled = exp.settledBy.includes(person);
+        if (!settled) {
+          balances[person] -= share;
+          balances[exp.paidBy] += share;
+        }
+      }
+    });
+  });
+
+  const owes = Object.entries(balances).filter(([, b]) => b < -0.01);
+  const owed = Object.entries(balances).filter(([, b]) => b > 0.01);
 
   return (
     <div style={{ paddingBottom: 40 }}>
       <div style={{ background: M.black, padding: '20px 20px 16px' }}>
-        <h2 style={{ fontFamily: serif, color: M.white, fontSize: 22, marginBottom: 4 }}>Group Budget</h2>
-        <p style={{ color: M.gray4, fontSize: 13 }}>{TRIP.destination} · {TRIP.startDate} – {TRIP.endDate}</p>
+        <h2 style={{ fontFamily: serif, color: M.white, fontSize: 22, marginBottom: 4 }}>Expense Tracking</h2>
+        {tripInfo.destination && (
+          <p style={{ color: M.red, fontSize: 13, marginBottom: 4 }}>
+            📍 {tripInfo.destination}{tripInfo.startDate && tripInfo.endDate ? ` · ${tripInfo.startDate} – ${tripInfo.endDate}` : ''}
+          </p>
+        )}
+        <p style={{ color: M.gray4, fontSize: 13 }}>Submit shared expenses and track who owes who. Hotel costs are paid individually.</p>
       </div>
-      <div style={{ padding: 20 }}>
-        {/* Summary cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-          {[
-            { label: 'Total Estimated', val: `$${total.toLocaleString()}`, color: M.black },
-            { label: 'Committed', val: `$${committed.toLocaleString()}`, color: M.red },
-            { label: 'Remaining', val: `$${(total - committed).toLocaleString()}`, color: M.green },
-            { label: 'Per Person (~18)', val: `$${Math.round(total / 18).toLocaleString()}`, color: M.teal },
-          ].map(({ label, val, color }) => (
-            <Card key={label} style={{ textAlign: 'center', padding: '14px 10px' }}>
-              <div style={{ fontSize: 20, fontWeight: 800, color }}>{val}</div>
-              <div style={{ fontSize: 11, color: M.gray5, marginTop: 2 }}>{label}</div>
-            </Card>
-          ))}
-        </div>
 
-        <Card>
-          <SectionTitle>Budget Breakdown</SectionTitle>
-          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {BUDGET_ITEMS.map(b => (
-              <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${M.gray2}` }}>
+      <div style={{ padding: 20 }}>
+        <button
+          onClick={() => setShowForm(v => !v)}
+          style={{ width: '100%', background: M.red, color: M.white, border: 'none', borderRadius: 10, padding: '13px', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: sans, marginBottom: 20 }}
+        >
+          + Submit an Expense
+        </button>
+
+        {showForm && (
+          <Card style={{ marginBottom: 20, background: '#fff8f8' }}>
+            <SectionTitle>New Expense</SectionTitle>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 5, textTransform: 'uppercase' }}>Description</label>
+                <input value={form.description} onChange={e => set('description', e.target.value)} placeholder="e.g. Dinner at Mikado" style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none' }} onFocus={e => (e.target.style.borderColor = M.red)} onBlur={e => (e.target.style.borderColor = M.gray3)} />
+              </div>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 5, textTransform: 'uppercase' }}>Amount ($)</label>
+                  <input type="number" value={form.amount} onChange={e => set('amount', e.target.value)} placeholder="0.00" min="0" style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none' }} onFocus={e => (e.target.style.borderColor = M.red)} onBlur={e => (e.target.style.borderColor = M.gray3)} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 5, textTransform: 'uppercase' }}>Category</label>
+                  <select value={form.category} onChange={e => set('category', e.target.value)} style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none', background: M.white }}>
+                    {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 5, textTransform: 'uppercase' }}>Paid By</label>
+                <select value={form.paidBy} onChange={e => set('paidBy', e.target.value)} style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none', background: M.white }}>
+                  {members.map(m => <option key={m.id}>{m.name}</option>)}
+                  {!members.find(m => m.name === currentUser) && currentUser && <option>{currentUser}</option>}
+                </select>
+              </div>
+              {members.length > 1 && (
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: M.black }}>{b.label}</div>
-                  <div style={{ fontSize: 11, color: M.gray4, marginTop: 2 }}>
-                    <Tag label={b.category} color={M.gray4} />
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 8, textTransform: 'uppercase' }}>Split With</label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {members.filter(m => m.name !== form.paidBy).map(m => (
+                      <button key={m.id} onClick={() => toggleSplit(m.name)}
+                        style={{ padding: '6px 12px', borderRadius: 20, border: `1.5px solid ${form.splitWith.includes(m.name) ? M.red : M.gray3}`, background: form.splitWith.includes(m.name) ? '#fff0f0' : M.white, color: form.splitWith.includes(m.name) ? M.red : M.gray5, fontFamily: sans, fontSize: 13, cursor: 'pointer', fontWeight: form.splitWith.includes(m.name) ? 700 : 400 }}>
+                        {m.name}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: M.black }}>${b.amount.toLocaleString()}</div>
-                  {b.committed
-                    ? <div style={{ fontSize: 11, color: M.green, fontWeight: 600 }}>✓ Committed</div>
-                    : <div style={{ fontSize: 11, color: M.gray4 }}>Estimated</div>
-                  }
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card style={{ marginTop: 16, background: '#fffdf2', border: `1.5px solid ${M.gold}` }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            <span style={{ fontSize: 24 }}>✨</span>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 14, color: M.black, marginBottom: 4 }}>Marriott Bonvoy Savings</div>
-              <div style={{ fontSize: 13, color: M.gray5, lineHeight: 1.6 }}>
-                With {TRIP.families} families booking through Bonvoy, you could earn up to <strong style={{ color: M.gold }}>{TRIP.bonvoyPts.toLocaleString()} points</strong> total — redeemable for future free nights.
-                {' '}Reaching the 10-room milestone unlocks an additional <strong style={{ color: M.red }}>{TRIP.discountPct}% group discount</strong>.
+              )}
+              <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                <GhostBtn onClick={() => setShowForm(false)}>Cancel</GhostBtn>
+                <PrimaryBtn style={{ flex: 1 }} onClick={submitExpense} disabled={!form.description || !form.amount}>Add Expense</PrimaryBtn>
               </div>
             </div>
+          </Card>
+        )}
+
+        {/* Balances */}
+        {expenses.length > 0 && (owes.length > 0 || owed.length > 0) && (
+          <Card style={{ marginBottom: 20, background: '#f0fafa' }}>
+            <SectionTitle>💳 Who Owes What</SectionTitle>
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {owes.map(([name, bal]) => (
+                <div key={name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${M.gray2}`, fontSize: 13 }}>
+                  <span style={{ color: M.black, fontWeight: 600 }}>{name}</span>
+                  <span style={{ color: M.red, fontWeight: 700 }}>owes ${Math.abs(bal).toFixed(2)}</span>
+                </div>
+              ))}
+              {owed.map(([name, bal]) => (
+                <div key={name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${M.gray2}`, fontSize: 13 }}>
+                  <span style={{ color: M.black, fontWeight: 600 }}>{name}</span>
+                  <span style={{ color: M.green, fontWeight: 700 }}>gets back ${bal.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Expense list */}
+        {expenses.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '48px 20px', color: M.gray4 }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🧾</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: M.gray5, marginBottom: 6 }}>No expenses yet</div>
+            <div style={{ fontSize: 13 }}>Submit your first shared expense above. Hotel costs are tracked individually.</div>
           </div>
-        </Card>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {expenses.map(exp => {
+              const perPerson = exp.splitWith.length > 0 ? (exp.amount / (exp.splitWith.length + 1)).toFixed(2) : exp.amount.toFixed(2);
+              return (
+                <Card key={exp.id} style={{ padding: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: M.black }}>{exp.description}</div>
+                      <div style={{ fontSize: 12, color: M.gray4, marginTop: 2 }}>{exp.date} · <Tag label={exp.category} color={M.teal} /></div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: 800, fontSize: 18, color: M.red }}>${exp.amount.toFixed(2)}</div>
+                      <div style={{ fontSize: 11, color: M.gray4 }}>Paid by {exp.paidBy}</div>
+                    </div>
+                  </div>
+                  {exp.splitWith.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 12, color: M.gray5, marginBottom: 6 }}>Split with: {exp.splitWith.join(', ')} · ${perPerson}/person</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {exp.splitWith.map(name => {
+                          const settled = exp.settledBy.includes(name);
+                          return (
+                            <button key={name} onClick={() => !settled && markSettled(exp.id, name)}
+                              style={{ padding: '4px 10px', borderRadius: 20, border: `1.5px solid ${settled ? M.green : M.gray3}`, background: settled ? '#e8f5e9' : M.white, color: settled ? M.green : M.gray5, fontFamily: sans, fontSize: 12, cursor: settled ? 'default' : 'pointer', fontWeight: 600 }}>
+                              {settled ? '✓ ' : ''}{name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // ─── Invite Tab ───────────────────────────────────────────────────────────────
-function InviteTab({ members }) {
+function InviteTab({ members, tripInfo = {} }) {
   const [copied, setCopied] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
+  const [sentEmails, setSentEmails] = useState([]);
   const shareLink = `${window.location.origin}?trip=orlando-2026&ref=organizer`;
 
   const copy = () => {
@@ -498,14 +916,98 @@ function InviteTab({ members }) {
     });
   };
 
+  const sendEmailInvite = () => {
+    const to = emailInput.trim();
+    if (!to) return;
+    const tripName = tripInfo.name || 'our group trip';
+    const subject = encodeURIComponent(`You're invited to ${tripName}! 🌴`);
+    const bodyLines = [
+      `Hi there!`,
+      ``,
+      `You've been invited to join ${tripName}!`,
+      ``,
+      `📍 Destination: ${tripInfo.destination || ''}`,
+      `📅 Dates: ${tripInfo.startDate || ''} – ${tripInfo.endDate || ''}`,
+      tripInfo.organizerName ? `👤 Organized by: ${tripInfo.organizerName}` : '',
+      ``,
+      `Click the link below to join the trip, book your room, and start planning with the crew:`,
+      shareLink,
+      ``,
+      `See you there! 🌴`,
+    ].filter(l => l !== null);
+    const body = encodeURIComponent(bodyLines.join('\n'));
+    window.open(`mailto:${to}?subject=${subject}&body=${body}`);
+    setSentEmails(prev => [...new Set([...prev, to])]);
+    setEmailInput('');
+  };
+
+  const openWhatsApp = () => {
+    const tripName = tripInfo.name || 'our group trip';
+    const text = encodeURIComponent(`You're invited to ${tripName}! 🌴\n📍 ${tripInfo.destination || ''} · ${tripInfo.startDate || ''} – ${tripInfo.endDate || ''}\nJoin here: ${shareLink}`);
+    window.open(`https://wa.me/?text=${text}`);
+  };
+
+  const openSMS = () => {
+    const text = encodeURIComponent(`You're invited to ${tripInfo.name || 'our group trip'}! Join here: ${shareLink}`);
+    window.open(`sms:?body=${text}`);
+  };
+
   return (
     <div style={{ padding: '20px 20px 40px' }}>
-      <div style={{ textAlign: 'center', marginBottom: 28 }}>
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <div style={{ fontSize: 48, marginBottom: 10 }}>✉️</div>
         <h2 style={{ fontFamily: serif, fontSize: 24, color: M.black, marginBottom: 6 }}>Invite Your Crew</h2>
-        <p style={{ color: M.gray5, fontSize: 14 }}>Share this link. Your guests will go through a guided onboarding to book their room and add their travel info.</p>
+        {tripInfo.destination && (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, color: M.red, fontWeight: 600 }}>📍 {tripInfo.destination}</span>
+            {tripInfo.startDate && tripInfo.endDate && (
+              <span style={{ fontSize: 13, color: M.gray5 }}>📅 {tripInfo.startDate} – {tripInfo.endDate}</span>
+            )}
+          </div>
+        )}
+        <p style={{ color: M.gray5, fontSize: 14 }}>Your guests will go through a guided onboarding to book their room and add their travel info.</p>
       </div>
 
+      {/* Email compose box */}
+      <Card style={{ marginBottom: 20, background: '#f0f4ff' }}>
+        <SectionTitle>📧 Send Email Invite</SectionTitle>
+        <p style={{ fontSize: 13, color: M.gray5, marginTop: 4, marginBottom: 14 }}>
+          Enter an email address and we'll open your mail client with a pre-filled invite.
+        </p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            type="email"
+            value={emailInput}
+            onChange={e => setEmailInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && sendEmailInvite()}
+            placeholder="attendee@example.com"
+            style={{ flex: 1, padding: '10px 13px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none' }}
+            onFocus={e => (e.target.style.borderColor = '#4285f4')}
+            onBlur={e => (e.target.style.borderColor = M.gray3)}
+          />
+          <button
+            onClick={sendEmailInvite}
+            disabled={!emailInput.trim()}
+            style={{ background: emailInput.trim() ? '#4285f4' : M.gray3, color: M.white, border: 'none', borderRadius: 8, padding: '10px 18px', cursor: emailInput.trim() ? 'pointer' : 'default', fontFamily: sans, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}
+          >
+            Send Invite →
+          </button>
+        </div>
+        {sentEmails.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, color: M.gray5, marginBottom: 6 }}>Invites sent to:</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {sentEmails.map(email => (
+                <span key={email} style={{ fontSize: 12, background: '#e8f0fe', color: '#4285f4', borderRadius: 20, padding: '3px 10px', fontWeight: 600 }}>
+                  ✓ {email}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Share link */}
       <div style={{ background: M.gray1, border: `1.5px solid ${M.gray2}`, borderRadius: 12, padding: '14px 16px', display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20 }}>
         <span style={{ flex: 1, fontFamily: 'monospace', fontSize: 12, color: M.black, wordBreak: 'break-all' }}>{shareLink}</span>
         <button
@@ -517,7 +1019,7 @@ function InviteTab({ members }) {
       </div>
 
       {/* Crew list */}
-      <Card>
+      <Card style={{ marginBottom: 16 }}>
         <SectionTitle>👥 Current Crew ({members.length} members)</SectionTitle>
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {members.map(m => (
@@ -539,12 +1041,11 @@ function InviteTab({ members }) {
         </div>
       </Card>
 
-      {/* Share options */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
+      {/* Other share options */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         {[
-          { icon: '📧', label: 'Email', color: '#4285f4' },
-          { icon: '💬', label: 'Text Message', color: M.green },
-          { icon: '📱', label: 'WhatsApp', color: '#25d366' },
+          { icon: '💬', label: 'Text Message', color: M.green, action: openSMS },
+          { icon: '📱', label: 'WhatsApp', color: '#25d366', action: openWhatsApp },
           { icon: '🔗', label: 'Copy Link', color: M.gray5, action: copy },
         ].map(({ icon, label, color, action }) => (
           <button

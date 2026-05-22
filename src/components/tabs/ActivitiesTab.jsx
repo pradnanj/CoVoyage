@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { M, sans, serif, ACTIVITIES, MEMBERS, CATEGORY_COLORS } from '../../constants.js';
+import { M, sans, serif, CATEGORY_COLORS } from '../../constants.js';
 import { Card, SectionTitle, Tag, Av, PrimaryBtn, GhostBtn, AISearch } from '../shared.jsx';
 
 const FOOD_PREFS = ['Gluten-Free', 'Vegan', 'Vegetarian', 'Nut Allergy', 'Dairy-Free', 'Halal', 'Kosher', 'No Spice'];
 
-export default function ActivitiesTab({ activities, onUpvote, onDownvote, onCommentAdd, onBook }) {
+export default function ActivitiesTab({ activities, currentUser, onUpvote, onDownvote, onCommentAdd, onBook, onAddActivity }) {
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('All');
   const [sort, setSort] = useState('popular');
@@ -17,7 +17,7 @@ export default function ActivitiesTab({ activities, onUpvote, onDownvote, onComm
   const [showAddActivity, setShowAddActivity] = useState(false);
   const [newActivity, setNewActivity] = useState({ title: '', category: 'Outdoor', price: '', description: '', emoji: '✨' });
 
-  const categories = ['All', ...new Set(ACTIVITIES.map(a => a.category))];
+  const categories = ['All', ...new Set(activities.map(a => a.category))];
 
   const filtered = activities
     .filter(a => filterCat === 'All' || a.category === filterCat)
@@ -171,7 +171,38 @@ export default function ActivitiesTab({ activities, onUpvote, onDownvote, onComm
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
               <GhostBtn onClick={() => setShowAddActivity(false)}>Cancel</GhostBtn>
-              <PrimaryBtn onClick={() => { /* would call a prop to add */ setShowAddActivity(false); }}>Submit Idea</PrimaryBtn>
+              <PrimaryBtn
+                onClick={() => {
+                  if (!newActivity.title.trim()) return;
+                  const activity = {
+                    id: `a-${Date.now()}`,
+                    title: newActivity.title,
+                    category: newActivity.category,
+                    emoji: newActivity.emoji || '✨',
+                    price: parseFloat(newActivity.price) || 0,
+                    priceType: 'per person',
+                    description: newActivity.description,
+                    duration: '',
+                    dates: [],
+                    times: [],
+                    ageMin: null,
+                    ageMax: null,
+                    deadline: null,
+                    cancellation: '',
+                    upvotes: 0,
+                    downvotes: 0,
+                    comments: [],
+                    voters: [],
+                    hotelPriority: false,
+                    booked: false,
+                    suggestedBy: currentUser || 'Someone',
+                  };
+                  if (onAddActivity) onAddActivity(activity);
+                  setNewActivity({ title: '', category: 'Outdoor', price: '', description: '', emoji: '✨' });
+                  setShowAddActivity(false);
+                }}
+                disabled={!newActivity.title.trim()}
+              >Submit Idea</PrimaryBtn>
             </div>
           </Card>
         )}
@@ -255,13 +286,18 @@ function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, com
                 ))}
               </div>
             )}
+            {/* Suggested by */}
+            {act.suggestedBy && (
+              <div style={{ fontSize: 12, color: M.gray4, marginTop: 8 }}>
+                💡 Suggested by <strong style={{ color: M.gray5 }}>{act.suggestedBy}</strong>
+              </div>
+            )}
             {/* Voter avatars */}
             {act.voters.length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 10 }}>
-                {act.voters.slice(0, 5).map(name => {
-                  const m = MEMBERS.find(m => m.name === name);
-                  return <Av key={name} name={name} size={22} color={m?.color} />;
-                })}
+                {act.voters.slice(0, 5).map(name => (
+                  <Av key={name} name={name} size={22} />
+                ))}
                 {act.voters.length > 5 && <span style={{ fontSize: 11, color: M.gray4 }}>+{act.voters.length - 5}</span>}
               </div>
             )}
@@ -277,7 +313,7 @@ function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, com
             <div style={{ marginTop: 10 }}>
               {act.comments.map((c, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                  <Av name={c.user} size={26} color={MEMBERS.find(m => m.name === c.user)?.color} />
+                  <Av name={c.user} size={26} />
                   <div style={{ background: M.gray1, borderRadius: 10, padding: '6px 10px', flex: 1 }}>
                     <div style={{ fontWeight: 600, fontSize: 12, color: M.black }}>{c.user} <span style={{ fontWeight: 400, color: M.gray4 }}>{c.time}</span></div>
                     <div style={{ fontSize: 13, color: M.gray5, marginTop: 2 }}>{c.text}</div>

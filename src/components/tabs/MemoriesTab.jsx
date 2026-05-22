@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { M, sans, serif, TRIP, MOCK_PHOTOS } from "../../constants.js";
 import { SectionTitle, PrimaryBtn, GhostBtn, Tag } from "../shared.jsx";
 
@@ -56,7 +56,7 @@ async function claudePostcard(photos) {
     .map(p => `"${p.label}": ${p.caption}`)
     .join("\n");
 
-  const memberNames = TRIP.members.map(m => m.name);
+  const memberNames = [];
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -68,7 +68,7 @@ async function claudePostcard(photos) {
         system: `You create warm, poetic trip memorabilia text for family travel scrapbooks. Write in editorial travel-memoir style — specific, evocative, personal.`,
         messages: [{
           role: "user",
-          content: `Trip: ${TRIP.name}, ${TRIP.dates}, Marriott Nashville Downtown
+          content: `Trip: ${tripInfo?.name || TRIP.name}, ${tripInfo?.startDate && tripInfo?.endDate ? `${tripInfo.startDate} – ${tripInfo.endDate}` : TRIP.dates}, ${tripInfo?.destination || TRIP.destination}
 Families: ${memberNames.join(", ")}
 Highlights: ${TRIP_HIGHLIGHTS.join(", ")}
 Photo moments:\n${captionSummaries}
@@ -212,8 +212,29 @@ function Postcard({ data, photos, onClose }) {
 }
 
 // ─── MEMORIES TAB ─────────────────────────────────────────────────────────────
-export default function MemoriesTab() {
-  const [photos, setPhotos] = useState(MOCK_PHOTOS);
+export default function MemoriesTab({ tripInfo }) {
+  const [photos, setPhotos] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crewfare_memories');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return MOCK_PHOTOS;
+  });
+
+  // Persist photos to localStorage; strip large base64 srcs if quota is exceeded
+  useEffect(() => {
+    try {
+      localStorage.setItem('crewfare_memories', JSON.stringify(photos));
+    } catch {
+      try {
+        const stripped = photos.map(p => ({
+          ...p,
+          src: p.src?.startsWith('data:') ? undefined : p.src,
+        }));
+        localStorage.setItem('crewfare_memories', JSON.stringify(stripped));
+      } catch { /* ignore */ }
+    }
+  }, [photos]);
   const [view, setView] = useState("grid");
   const [activeTag, setActiveTag] = useState("All");
   const [captioningId, setCaptioningId] = useState(null);

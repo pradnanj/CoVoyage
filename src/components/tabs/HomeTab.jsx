@@ -4,19 +4,22 @@ import { Card, SectionTitle, Tag, Av, PrimaryBtn } from '../shared.jsx';
 
 const DISCOUNT_TARGET = TRIP.discountRooms;
 
-export default function HomeTab({ activities, hotels, members, onUpvote, onDownvote, onCommentAdd }) {
+export default function HomeTab({ activities, hotels, members, tripInfo, onUpvote, onDownvote, onCommentAdd }) {
   const [commentInputs, setCommentInputs] = useState({});
   const bookedRooms = hotels.reduce((acc, h) => acc + h.bookedBy.length, 0);
   const pct = Math.min((bookedRooms / DISCOUNT_TARGET) * 100, 100);
   const discountActive = bookedRooms >= DISCOUNT_TARGET;
 
-  console.log('[HomeTab render] members count:', members.length, '| names:', members.map(m => m.name));
-  console.log('[HomeTab render] bookedRooms:', bookedRooms);
-
   // Sort activities by net votes descending — reactively re-sorts on every vote
   const topActivities = [...activities]
     .sort((a, b) => (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes))
     .slice(0, 5);
+
+  const tripName = tripInfo?.name || TRIP.name;
+  const tripDestination = tripInfo?.destination || TRIP.destination;
+  const tripDates = tripInfo?.startDate && tripInfo?.endDate
+    ? `${tripInfo.startDate} – ${tripInfo.endDate}`
+    : `${TRIP.startDate} – ${TRIP.endDate}`;
 
   return (
     <div style={{ padding: '0 0 40px' }}>
@@ -27,14 +30,14 @@ export default function HomeTab({ activities, hotels, members, onUpvote, onDownv
         backgroundImage: `linear-gradient(135deg, rgba(168,38,42,0.97) 0%, rgba(45,10,10,0.97) 100%), url('https://images.unsplash.com/photo-1516339901601-2e1b62dc0c45?w=1200&q=60')`,
         backgroundSize: 'cover', backgroundBlendMode: 'multiply',
       }}>
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', opacity: 0.7, marginBottom: 6 }}>Marriott Bonvoy Group Trips</div>
-        <h1 style={{ fontFamily: serif, fontSize: 30, fontWeight: 400, marginBottom: 6 }}>{TRIP.name}</h1>
-        <div style={{ opacity: 0.85, fontSize: 14 }}>📍 {TRIP.destination} · {TRIP.startDate} – {TRIP.endDate}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', opacity: 0.7, marginBottom: 6 }}>Marriott Bonvoy</div>
+        <h1 style={{ fontFamily: serif, fontSize: 30, fontWeight: 400, marginBottom: 6 }}>{tripName}</h1>
+        <div style={{ opacity: 0.85, fontSize: 14 }}>📍 {tripDestination} · {tripDates}</div>
         <div style={{ display: 'flex', gap: 16, marginTop: 16, flexWrap: 'wrap' }}>
           {[
-            { label: 'Families', val: TRIP.families },
-            { label: 'Travelers', val: TRIP.travelers },
-            { label: 'Bonvoy Pts', val: `${(TRIP.bonvoyPts / 1000).toFixed(0)}K` },
+            { label: 'Members', val: members.length || 0 },
+            { label: 'Rooms Booked', val: bookedRooms },
+            { label: 'Activities', val: activities.length || 0 },
           ].map(({ label, val }) => (
             <div key={label} style={{ textAlign: 'center', background: 'rgba(255,255,255,0.12)', borderRadius: 10, padding: '8px 16px' }}>
               <div style={{ fontSize: 20, fontWeight: 700 }}>{val}</div>

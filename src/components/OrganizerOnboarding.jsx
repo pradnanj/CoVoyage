@@ -46,11 +46,12 @@ const StepIndicator = ({ current, total }) => (
 export default function OrganizerOnboarding({ onComplete }) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState({
-    tripName: 'Orlando Family Adventure',
-    destination: 'Orlando, FL',
-    startDate: '2026-07-12',
-    endDate: '2026-07-18',
+    tripName: '',
+    destination: '',
+    startDate: '',
+    endDate: '',
     hotel: null,
+    notFlying: false,
     flightArrival: '',
     flightDeparture: '',
     airline: '',
@@ -84,7 +85,7 @@ export default function OrganizerOnboarding({ onComplete }) {
           <div style={{ width: 36, height: 36, borderRadius: 8, background: M.red, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: M.white, fontSize: 16 }}>M</div>
           <div>
             <div style={{ color: M.white, fontWeight: 700, fontSize: 16 }}>Marriott Bonvoy</div>
-            <div style={{ color: M.gray4, fontSize: 12 }}>Group Trip Planner</div>
+            <div style={{ color: M.gray4, fontSize: 12 }}>CoVoyage</div>
           </div>
           <div style={{ marginLeft: 'auto', background: 'rgba(200,168,76,0.15)', color: M.gold, border: `1px solid ${M.gold}`, borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
             ORGANIZER
@@ -98,7 +99,7 @@ export default function OrganizerOnboarding({ onComplete }) {
           {step === 0 && (
             <div style={{ textAlign: 'center', paddingTop: 8 }}>
               <div style={{ fontSize: 56, marginBottom: 16 }}>🌴</div>
-              <h1 style={{ fontFamily: serif, fontSize: 30, color: M.black, marginBottom: 12 }}>Plan Your Group Trip</h1>
+              <h1 style={{ fontFamily: serif, fontSize: 30, color: M.black, marginBottom: 12 }}>Plan Your Trip</h1>
               <p style={{ color: M.gray5, fontSize: 16, lineHeight: 1.6, marginBottom: 32, maxWidth: 420, margin: '0 auto 32px' }}>
                 You're the <strong>Trip Organizer</strong>. Set the destination, book the first room, and invite your crew — all in one place.
               </p>
@@ -174,16 +175,24 @@ export default function OrganizerOnboarding({ onComplete }) {
           {step === 3 && (
             <div>
               <h2 style={{ fontFamily: serif, fontSize: 24, color: M.black, marginBottom: 6 }}>Your Travel Details</h2>
-              <p style={{ color: M.gray5, marginBottom: 28, fontSize: 14 }}>Helps the group coordinate arrivals and plan shuttle logistics.</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Input label="Airline" value={form.airline} onChange={v => set('airline', v)} placeholder="e.g. Delta, United" />
-                <Input label="Flight #" value={form.flightNum} onChange={v => set('flightNum', v)} placeholder="e.g. DL 2204" />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <Input label="Arrival Date & Time" type="datetime-local" value={form.flightArrival} onChange={v => set('flightArrival', v)} />
-                <Input label="Departure Date & Time" type="datetime-local" value={form.flightDeparture} onChange={v => set('flightDeparture', v)} />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+              <p style={{ color: M.gray5, marginBottom: 16, fontSize: 14 }}>Let others in your group know when you'll be arriving and departing for easier planning.</p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, cursor: 'pointer', fontSize: 14, color: M.black, fontFamily: sans, background: M.gray1, borderRadius: 10, padding: '12px 14px' }}>
+                <input type="checkbox" checked={form.notFlying} onChange={e => set('notFlying', e.target.checked)} style={{ width: 18, height: 18, cursor: 'pointer', accentColor: M.red }} />
+                <span>I will not be flying to the destination</span>
+              </label>
+              {!form.notFlying && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <Input label="Airline" value={form.airline} onChange={v => set('airline', v)} placeholder="e.g. Delta, United" />
+                    <Input label="Flight #" value={form.flightNum} onChange={v => set('flightNum', v)} placeholder="e.g. DL 2204" />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <Input label="Arrival Date & Time" type="datetime-local" value={form.flightArrival} onChange={v => set('flightArrival', v)} />
+                    <Input label="Departure Date & Time" type="datetime-local" value={form.flightDeparture} onChange={v => set('flightDeparture', v)} />
+                  </div>
+                </>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 8 }}>
                 <GhostBtn onClick={back}>Back</GhostBtn>
                 <PrimaryBtn onClick={next}>Continue →</PrimaryBtn>
               </div>
@@ -222,7 +231,7 @@ export default function OrganizerOnboarding({ onComplete }) {
           {step === 5 && (
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 56, marginBottom: 12 }}>🎉</div>
-              <h2 style={{ fontFamily: serif, fontSize: 26, color: M.black, marginBottom: 8 }}>Your Trip Microsite is Ready!</h2>
+              <h2 style={{ fontFamily: serif, fontSize: 26, color: M.black, marginBottom: 8 }}>Your Trip is Ready!</h2>
               <p style={{ color: M.gray5, fontSize: 14, marginBottom: 28 }}>
                 Share this link with your crew. They'll go through a guided setup to book rooms and add their flight details.
               </p>
@@ -254,7 +263,7 @@ export default function OrganizerOnboarding({ onComplete }) {
                 ))}
               </div>
 
-              <PrimaryBtn onClick={() => onComplete(form.organizerName)} style={{ width: '100%' }}>Go to Trip Dashboard →</PrimaryBtn>
+              <PrimaryBtn onClick={() => onComplete(form.organizerName, form.hotel, form)} style={{ width: '100%' }}>Go to Trip Dashboard →</PrimaryBtn>
             </div>
           )}
         </div>

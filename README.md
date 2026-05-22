@@ -1,4 +1,4 @@
-# Crewfare — Marriott Bonvoy Group Trip Planner
+# Crewfare — CoVoyage
 
 A full-featured group trip planning microsite built with React + Vite, powered by Marriott Bonvoy branding and an AI concierge backed by Claude (Anthropic).
 

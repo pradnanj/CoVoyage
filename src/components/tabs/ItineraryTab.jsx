@@ -1,14 +1,34 @@
 import { useState } from 'react';
-import { M, sans, serif, ITINERARY, MEMBERS, TYPE_COLORS, TRIP } from '../../constants.js';
+import { M, sans, serif, ITINERARY, TYPE_COLORS, TRIP } from '../../constants.js';
 import { Card, SectionTitle, Tag, Av, PrimaryBtn, GhostBtn } from '../shared.jsx';
 
 const EVENT_TYPES = ['activity', 'food', 'hotel', 'transport', 'personal'];
 
-export default function ItineraryTab({ itinerary, onAddEvent }) {
+export default function ItineraryTab({ itinerary, members = [], tripInfo, onAddEvent }) {
+  // Use tripInfo (from organizer onboarding) if available, otherwise fall back to TRIP constants
+  const tripStart = tripInfo?.startISO || TRIP.startISO;
+  const tripEnd = tripInfo?.endISO || TRIP.endISO;
+
+  // Generate date slots from trip dates so events can always be added even when itinerary is empty
+  const generateTripDays = () => {
+    const days = [];
+    const start = new Date(tripStart + 'T00:00:00');
+    const end = new Date(tripEnd + 'T00:00:00');
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const label = `${dayNames[d.getDay()]}, ${monthNames[d.getMonth()]} ${d.getDate()}`;
+      const existing = itinerary.find(day => day.date === label);
+      days.push(existing || { date: label, items: [] });
+    }
+    return days;
+  };
+
+  const tripDays = generateTripDays();
   const [showAddModal, setShowAddModal] = useState(false);
   const [filterWho, setFilterWho] = useState('All');
   const [newEvent, setNewEvent] = useState({
-    date: itinerary[0]?.date || '',
+    date: '',
     time: '',
     title: '',
     type: 'activity',
@@ -19,27 +39,32 @@ export default function ItineraryTab({ itinerary, onAddEvent }) {
 
   const setE = (k, v) => setNewEvent(f => ({ ...f, [k]: v }));
 
-  const whoOptions = ['All', ...MEMBERS.map(m => m.name)];
+  const whoOptions = ['All', ...members.map(m => m.name)];
 
-  const filteredItinerary = itinerary.map(day => ({
+  const filteredItinerary = tripDays.map(day => ({
     ...day,
     items: day.items.filter(item => filterWho === 'All' || item.who === 'All' || item.who === filterWho || item.who.includes(filterWho)),
-  })).filter(day => day.items.length > 0);
+  }));
 
   const handleAdd = () => {
     if (newEvent.title && newEvent.time) {
-      onAddEvent && onAddEvent(newEvent);
+      const eventDate = newEvent.date || tripDays[0]?.date || '';
+      onAddEvent && onAddEvent({ ...newEvent, date: eventDate });
       setShowAddModal(false);
-      setNewEvent({ date: itinerary[0]?.date || '', time: '', title: '', type: 'activity', who: 'All', private: false, note: '' });
+      setNewEvent({ date: '', time: '', title: '', type: 'activity', who: 'All', private: false, note: '' });
     }
+  };
+
+  const openModal = () => {
+    setNewEvent(f => ({ ...f, date: f.date || tripDays[0]?.date || '' }));
+    setShowAddModal(true);
   };
 
   return (
     <div style={{ paddingBottom: 40 }}>
       {/* Header */}
       <div style={{ background: M.black, padding: '20px 20px 16px' }}>
-        <h2 style={{ fontFamily: serif, color: M.white, fontSize: 22, marginBottom: 4 }}>Group Itinerary</h2>
-        <p style={{ color: M.gray4, fontSize: 13, marginBottom: 14 }}>{TRIP.startDate} – {TRIP.endDate} · {TRIP.destination}</p>
+        <h2 style={{ fontFamily: serif, color: M.white, fontSize: 22, marginBottom: 14 }}>{(tripInfo?.name || TRIP.name)} Itinerary</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: M.gray5, marginRight: 4 }}>Filter by:</span>
           {whoOptions.map(w => (
@@ -57,7 +82,7 @@ export default function ItineraryTab({ itinerary, onAddEvent }) {
             </button>
           ))}
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => openModal()}
             style={{ marginLeft: 'auto', background: M.red, color: M.white, border: 'none', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontFamily: sans, fontSize: 13, fontWeight: 600 }}
           >
             + Add Event
@@ -96,7 +121,7 @@ export default function ItineraryTab({ itinerary, onAddEvent }) {
                   onChange={e => setE('date', e.target.value)}
                   style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none', background: M.white }}
                 >
-                  {itinerary.map(d => <option key={d.date} value={d.date}>{d.date}</option>)}
+                  {tripDays.map(d => <option key={d.date} value={d.date}>{d.date}</option>)}
                 </select>
               </div>
               <div style={{ flex: 1 }}>
@@ -142,7 +167,6 @@ export default function ItineraryTab({ itinerary, onAddEvent }) {
       <div style={{ padding: '20px 20px 0' }}>
         {filteredItinerary.map((day, di) => (
           <div key={day.date} style={{ marginBottom: 28 }}>
-            {/* Day header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
               <div style={{ background: M.red, color: M.white, borderRadius: 10, padding: '6px 14px', fontWeight: 700, fontSize: 14, fontFamily: sans }}>
                 {day.date}
@@ -150,13 +174,16 @@ export default function ItineraryTab({ itinerary, onAddEvent }) {
               <div style={{ flex: 1, height: 1, background: M.gray2 }} />
             </div>
 
-            {/* Events */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 12, borderLeft: `3px solid ${M.gray2}`, position: 'relative' }}>
+            {day.items.length === 0 ? (
+              <div style={{ paddingLeft: 12, borderLeft: `3px solid ${M.gray2}`, color: M.gray4, fontSize: 13, paddingTop: 4, paddingBottom: 4 }}>
+                No events yet — click <strong>+ Add Event</strong> to add one.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 12, borderLeft: `3px solid ${M.gray2}`, position: 'relative' }}>
               {day.items.map((item, ii) => {
                 const typeColor = TYPE_COLORS[item.type] || M.gray4;
                 return (
                   <div key={item.id || ii} style={{ display: 'flex', gap: 12, position: 'relative' }}>
-                    {/* Timeline dot */}
                     <div style={{ position: 'absolute', left: -19, top: 14, width: 10, height: 10, borderRadius: '50%', background: typeColor, border: `2px solid ${M.white}`, boxShadow: `0 0 0 2px ${typeColor}` }} />
                     <div style={{
                       background: item.private ? '#f8f0ff' : M.white,
@@ -184,7 +211,7 @@ export default function ItineraryTab({ itinerary, onAddEvent }) {
                       {item.who !== 'All' && (
                         <div style={{ marginTop: 8, display: 'flex', gap: 4 }}>
                           {[item.who].flat().map(name => {
-                            const m = MEMBERS.find(m => m.name === name || name.includes(m.name.split(' ')[0]));
+                            const m = members.find(m => m.name === name || name.includes(m.name.split(' ')[0]));
                             return <Av key={name} name={name} size={20} color={m?.color} />;
                           })}
                         </div>
@@ -193,13 +220,14 @@ export default function ItineraryTab({ itinerary, onAddEvent }) {
                   </div>
                 );
               })}
-            </div>
+              </div>
+            )}
           </div>
         ))}
 
         {filteredItinerary.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: M.gray4 }}>
-            No events for this filter. Try selecting a different person or add a new event.
+            No events yet. Click <strong>+ Add Event</strong> to build your itinerary.
           </div>
         )}
       </div>

@@ -28,29 +28,21 @@ export const TRIP = {
   endISO:      '2026-07-18',
   families:    5,
   travelers:   18,
-  budget:      9500,
   bonvoyPts:   62000,
-  organizer:   'Sarah M.',
   shareLink:   'https://crewfare.app/trip/orlando-2026',
   discountRooms: 10,
   discountPct:   12,
 };
 
-// ─── Group Members ────────────────────────────────────────────────────────────
-export const MEMBERS = [
-  { id: 'm1', name: 'Sarah M.',   initials: 'SM', color: M.red,   role: 'organizer', hotel: 'Marriott World Center', room: '412', confirmed: true  },
-  { id: 'm2', name: 'James K.',   initials: 'JK', color: M.teal,  role: 'attendee',  hotel: 'Marriott World Center', room: '415', confirmed: true  },
-  { id: 'm3', name: 'Priya L.',   initials: 'PL', color: M.gold,  role: 'attendee',  hotel: 'JW Marriott Grande Lakes', room: '202', confirmed: true  },
-  { id: 'm4', name: 'Dan R.',     initials: 'DR', color: M.coral, role: 'attendee',  hotel: 'Marriott World Center', room: '508', confirmed: true  },
-  { id: 'm5', name: 'Mei T.',     initials: 'MT', color: M.green, role: 'attendee',  hotel: 'Courtyard Lake Buena Vista', room: '301', confirmed: false },
-];
+// ─── Group Members (blank slate — populated at runtime) ──────────────────────
+export const MEMBERS = [];
 
 // ─── Hotels ───────────────────────────────────────────────────────────────────
 export const HOTELS = [
   {
     id:        'h1',
     name:      'Orlando World Center Marriott',
-    badge:     '★ Organizer\'s Hotel',
+    badge:     "★ Organizer's Hotel",
     highlight: true,
     address:   '8701 World Center Dr, Orlando, FL',
     distance:  '0.3 mi to Disney Springs',
@@ -59,7 +51,7 @@ export const HOTELS = [
     originalRate: 329,
     amenities: ['Pool Complex', 'Spa', 'Golf Course', 'Room Service', 'Kids Club', 'Free Shuttle'],
     image:     'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&q=80',
-    bookedBy:  ['Sarah M.', 'James K.', 'Dan R.'],
+    bookedBy:  [],
     bonvoyPts: 3200,
     hotelPriority: true,
   },
@@ -75,7 +67,7 @@ export const HOTELS = [
     originalRate: 399,
     amenities: ['Lazy River', 'Fine Dining', 'Spa', 'Tennis', 'Fitness Center'],
     image:     'https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?w=600&q=80',
-    bookedBy:  ['Priya L.'],
+    bookedBy:  [],
     bonvoyPts: 4100,
     hotelPriority: false,
   },
@@ -113,291 +105,32 @@ export const HOTELS = [
   },
 ];
 
-// ─── Activities ───────────────────────────────────────────────────────────────
-export const ACTIVITIES = [
-  {
-    id:        'a1',
-    title:     'Magic Kingdom — Disney World',
-    category:  'Theme Park',
-    emoji:     '🏰',
-    price:     109,
-    priceType: 'per person',
-    description: 'The most magical place on Earth! Classic rides, fireworks, and beloved Disney characters await all ages.',
-    duration:  'Full Day',
-    dates:     ['Jul 13', 'Jul 14', 'Jul 15', 'Jul 16', 'Jul 17'],
-    times:     ['9:00 AM – 10:00 PM'],
-    ageMin:    null,
-    ageMax:    null,
-    deadline:  'Jul 10, 2026',
-    cancellation: 'Non-refundable within 3 days',
-    upvotes:   12,
-    downvotes: 1,
-    comments:  [
-      { user: 'Sarah M.', text: 'The kids are SO excited for this!', time: '2d ago' },
-      { user: 'James K.', text: 'We should grab Lightning Lane passes early.', time: '1d ago' },
-    ],
-    voters:    ['Sarah M.', 'James K.', 'Priya L.', 'Dan R.'],
-    hotelPriority: false,
-    booked:    false,
-  },
-  {
-    id:        'a2',
-    title:     'Universal Studios Florida',
-    category:  'Theme Park',
-    emoji:     '🎬',
-    price:     115,
-    priceType: 'per person',
-    description: 'Wizarding World of Harry Potter, Jurassic World, Minions and more. Epic rides for every thrill level.',
-    duration:  'Full Day',
-    dates:     ['Jul 13', 'Jul 14', 'Jul 15', 'Jul 16'],
-    times:     ['9:00 AM – 9:00 PM'],
-    ageMin:    null,
-    ageMax:    null,
-    deadline:  'Jul 11, 2026',
-    cancellation: 'Refundable up to 24 hours before',
-    upvotes:   9,
-    downvotes: 2,
-    comments:  [
-      { user: 'Priya L.', text: 'My kids NEED to see Hogwarts!', time: '3d ago' },
-    ],
-    voters:    ['Priya L.', 'Mei T.'],
-    hotelPriority: false,
-    booked:    false,
-  },
-  {
-    id:        'a3',
-    title:     'Kennedy Space Center & NASA Shuttle',
-    category:  'Educational',
-    emoji:     '🚀',
-    price:     57,
-    priceType: 'per person',
-    description: 'See real space shuttles, meet an astronaut, and experience the history of American space exploration.',
-    duration:  'Half Day',
-    dates:     ['Jul 14', 'Jul 15', 'Jul 16', 'Jul 17'],
-    times:     ['9:00 AM – 5:00 PM'],
-    ageMin:    3,
-    ageMax:    null,
-    deadline:  'Jul 12, 2026',
-    cancellation: 'Refundable up to 48 hours before',
-    upvotes:   7,
-    downvotes: 0,
-    comments:  [
-      { user: 'Dan R.', text: 'Must-do. The shuttle launch simulator is incredible.', time: '1d ago' },
-    ],
-    voters:    ['Dan R.', 'James K.', 'Sarah M.'],
-    hotelPriority: false,
-    booked:    false,
-  },
-  {
-    id:        'a4',
-    title:     'World Center Marriott Pool & Cabana',
-    category:  'Pool / Resort',
-    emoji:     '🏊',
-    price:     0,
-    priceType: 'Included for hotel guests',
-    description: 'Relax at the award-winning pool complex. Cabana rentals available. Kids splash zones, waterslide, swim-up bar.',
-    duration:  'Full Day',
-    dates:     ['Jul 12', 'Jul 13', 'Jul 14', 'Jul 15', 'Jul 16', 'Jul 17', 'Jul 18'],
-    times:     ['8:00 AM – 10:00 PM'],
-    ageMin:    null,
-    ageMax:    null,
-    deadline:  null,
-    cancellation: 'Free cancellation',
-    upvotes:   14,
-    downvotes: 0,
-    comments:  [
-      { user: 'Sarah M.', text: 'Perfect for the day before everyone heads to parks!', time: '5d ago' },
-      { user: 'Mei T.', text: 'My toddler will love the splash zone.', time: '4d ago' },
-    ],
-    voters:    ['Sarah M.', 'James K.', 'Priya L.', 'Dan R.', 'Mei T.'],
-    hotelPriority: true,
-    booked:    false,
-  },
-  {
-    id:        'a5',
-    title:     'Marriott Spa Day',
-    category:  'Wellness',
-    emoji:     '💆',
-    price:     180,
-    priceType: 'per person',
-    description: 'Full-service spa at the Marriott World Center. Massages, facials, and relaxation packages for adults.',
-    duration:  '3 hours',
-    dates:     ['Jul 13', 'Jul 14', 'Jul 15', 'Jul 16', 'Jul 17'],
-    times:     ['10:00 AM', '12:00 PM', '2:00 PM', '4:00 PM'],
-    ageMin:    18,
-    ageMax:    null,
-    deadline:  'Jul 10, 2026',
-    cancellation: 'Refundable 24 hours before',
-    upvotes:   5,
-    downvotes: 1,
-    comments:  [
-      { user: 'Priya L.', text: 'YES please after a day at Disney!', time: '2d ago' },
-    ],
-    voters:    ['Priya L.', 'Sarah M.'],
-    hotelPriority: true,
-    booked:    false,
-  },
-  {
-    id:        'a6',
-    title:     'Cocoa Beach Day Trip',
-    category:  'Outdoor',
-    emoji:     '🏖️',
-    price:     0,
-    priceType: 'Free (drive ~1hr)',
-    description: 'Beautiful Atlantic coast beach just an hour east of Orlando. Great for surfing, sunbathing, and seafood.',
-    duration:  'Full Day',
-    dates:     ['Jul 14', 'Jul 15', 'Jul 16'],
-    times:     ['Flexible'],
-    ageMin:    null,
-    ageMax:    null,
-    deadline:  null,
-    cancellation: 'N/A',
-    upvotes:   8,
-    downvotes: 3,
-    comments:  [
-      { user: 'James K.', text: 'Can combine with Kennedy Space Center!', time: '1d ago' },
-    ],
-    voters:    ['James K.', 'Dan R.'],
-    hotelPriority: false,
-    booked:    false,
-  },
-  {
-    id:        'a7',
-    title:     'Marriott Hotel Restaurant: Mikado',
-    category:  'Food & Beverage',
-    emoji:     '🍱',
-    price:     45,
-    priceType: 'per person (avg)',
-    description: 'Teppanyaki and sushi restaurant on property at Marriott World Center. Fun tableside cooking show great for groups.',
-    duration:  '90 minutes',
-    dates:     ['Jul 12', 'Jul 13', 'Jul 14', 'Jul 15', 'Jul 16', 'Jul 17'],
-    times:     ['5:30 PM', '7:00 PM', '8:30 PM'],
-    ageMin:    null,
-    ageMax:    null,
-    deadline:  'Jul 10, 2026',
-    cancellation: 'Refundable 48 hours before',
-    upvotes:   10,
-    downvotes: 0,
-    comments:  [
-      { user: 'Dan R.', text: 'Great for the big group dinner — 18 people reservable.', time: '3d ago' },
-    ],
-    voters:    ['Sarah M.', 'Dan R.', 'James K.'],
-    hotelPriority: true,
-    booked:    false,
-  },
-  {
-    id:        'a8',
-    title:     'EPCOT Food & Wine Experience',
-    category:  'Food & Beverage',
-    emoji:     '🌍',
-    price:     99,
-    priceType: 'per person',
-    description: 'Sample cuisines from 30+ countries around the World Showcase. Live music, cultural experiences, and Disney magic.',
-    duration:  'Full Day',
-    dates:     ['Jul 13', 'Jul 14', 'Jul 15'],
-    times:     ['11:00 AM – 9:00 PM'],
-    ageMin:    null,
-    ageMax:    null,
-    deadline:  'Jul 11, 2026',
-    cancellation: 'Refundable up to 3 days before',
-    upvotes:   6,
-    downvotes: 2,
-    comments:  [],
-    voters:    ['Priya L.'],
-    hotelPriority: false,
-    booked:    false,
-  },
-];
+// ─── Activities (blank slate — attendees submit their own ideas) ──────────────
+export const ACTIVITIES = [];
 
-// ─── Itinerary ────────────────────────────────────────────────────────────────
-export const ITINERARY = [
-  {
-    date: 'Sat, Jul 12',
-    items: [
-      { id: 'i1', time: '2:00 PM', title: 'Hotel Check-In — Orlando World Center Marriott', type: 'hotel', who: 'All', private: false },
-      { id: 'i2', time: '4:00 PM', title: 'Welcome pool hang + cabana', type: 'activity', who: 'All', private: false },
-      { id: 'i3', time: '7:00 PM', title: 'Group dinner — Mikado (hotel restaurant)', type: 'food', who: 'All', private: false },
-    ],
-  },
-  {
-    date: 'Sun, Jul 13',
-    items: [
-      { id: 'i4', time: '9:00 AM', title: 'Magic Kingdom — Disney World', type: 'activity', who: 'All', private: false },
-      { id: 'i5', time: '9:30 PM', title: 'Fireworks at Magic Kingdom', type: 'activity', who: 'All', private: false },
-    ],
-  },
-  {
-    date: 'Mon, Jul 14',
-    items: [
-      { id: 'i6', time: '9:00 AM', title: 'Universal Studios / Harry Potter World', type: 'activity', who: 'Adults + older kids', private: false },
-      { id: 'i7', time: '10:00 AM', title: 'Grandmother spa appointment (Marriott Spa)', type: 'personal', who: 'Grandma Joyce', private: true },
-    ],
-  },
-  {
-    date: 'Tue, Jul 15',
-    items: [
-      { id: 'i8', time: '9:00 AM', title: 'Kennedy Space Center + NASA Shuttle Tour', type: 'activity', who: 'All', private: false },
-      { id: 'i9', time: '6:00 PM', title: 'Cocoa Beach sunset walk', type: 'activity', who: 'All', private: false },
-    ],
-  },
-  {
-    date: 'Wed, Jul 16',
-    items: [
-      { id: 'i10', time: 'All Day', title: 'Free Day — Pool, Disney Springs, rest', type: 'activity', who: 'All', private: false },
-    ],
-  },
-  {
-    date: 'Thu, Jul 17',
-    items: [
-      { id: 'i11', time: '10:00 AM', title: 'EPCOT Food & Wine', type: 'food', who: 'All', private: false },
-    ],
-  },
-  {
-    date: 'Fri, Jul 18',
-    items: [
-      { id: 'i12', time: '11:00 AM', title: 'Hotel Check-Out', type: 'hotel', who: 'All', private: false },
-    ],
-  },
-];
-
-// ─── Budget ───────────────────────────────────────────────────────────────────
-export const BUDGET_ITEMS = [
-  { id: 'b1', label: 'Hotel (6 nights × 7 rooms)', amount: 12138, committed: true,  category: 'Lodging'    },
-  { id: 'b2', label: 'Disney World tickets (18 pax)', amount: 1962, committed: true,  category: 'Activities' },
-  { id: 'b3', label: 'Universal Studios (14 pax)',    amount: 1610, committed: false, category: 'Activities' },
-  { id: 'b4', label: 'Kennedy Space Center (18 pax)', amount: 1026, committed: false, category: 'Activities' },
-  { id: 'b5', label: 'Mikado Group Dinner',           amount:  810, committed: false, category: 'Food'       },
-  { id: 'b6', label: 'Shuttle to Theme Parks',        amount:  240, committed: false, category: 'Transport'  },
-];
-
-// ─── Rewards / Badges ─────────────────────────────────────────────────────────
-export const REWARDS = [
-  { id: 'r1', title: 'Early Bird',      desc: 'Booked hotel within 24h of invite', pts: 500,  earned: true  },
-  { id: 'r2', title: 'Activity Guru',   desc: 'Suggested 3+ activities',            pts: 300,  earned: true  },
-  { id: 'r3', title: 'Crew Builder',    desc: 'Invited all attendees',               pts: 1000, earned: false },
-  { id: 'r4', title: 'Itinerary Hero',  desc: 'Added 5+ items to itinerary',        pts: 400,  earned: false },
-  { id: 'r5', title: 'Memory Maker',    desc: 'Uploaded 10+ photos',                pts: 200,  earned: false },
-];
+// ─── Itinerary (blank slate — organizer fills in) ────────────────────────────
+export const ITINERARY = [];
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 export const TABS = [
-  { id: 'home',      label: 'Home',       icon: '🏠' },
-  { id: 'hotels',    label: 'Hotels',     icon: '🏨' },
-  { id: 'activities',label: 'Activities', icon: '🎯' },
-  { id: 'itinerary', label: 'Itinerary',  icon: '📅' },
-  { id: 'budget',    label: 'Budget',     icon: '💰' },
-  { id: 'memories',  label: 'Memories',   icon: '📸' },
-  { id: 'invite',    label: 'Invite',     icon: '✉️'  },
+  { id: 'home',       label: 'Home',             icon: '🏠' },
+  { id: 'hotels',     label: 'Hotels',           icon: '🏨' },
+  { id: 'activities', label: 'Activities',       icon: '🎯' },
+  { id: 'itinerary',  label: 'Itinerary',        icon: '📅' },
+  { id: 'expenses',   label: 'Expense Tracking', icon: '🧾' },
+  { id: 'memories',   label: 'Memories',         icon: '📸' },
+  { id: 'invite',     label: 'Invite',           icon: '✉️'  },
 ];
 
 // ─── Activity Category Colors ─────────────────────────────────────────────────
 export const CATEGORY_COLORS = {
-  'Theme Park':   M.red,
-  'Educational':  M.teal,
-  'Pool / Resort':M.gold,
-  'Wellness':     '#7B68EE',
-  'Outdoor':      M.green,
+  'Theme Park':      M.red,
+  'Educational':     M.teal,
+  'Pool / Resort':   M.gold,
+  'Wellness':        '#7B68EE',
+  'Outdoor':         M.green,
   'Food & Beverage': M.coral,
+  'Other':           M.gray5,
 };
 
 export const TYPE_COLORS = {
