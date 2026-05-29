@@ -350,16 +350,6 @@ function LandingPage({ onOrganizer, onAttendee }) {
             🗺 I'm Planning a Trip
             <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.8, marginTop: 4 }}>Create a microsite & invite your crew</div>
           </button>
-
-          <button
-            onClick={onAttendee}
-            style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.85)', border: '1.5px solid rgba(255,255,255,0.2)', borderRadius: 12, padding: '20px 32px', fontSize: 17, fontWeight: 700, cursor: 'pointer', fontFamily: sans, transition: 'all 0.2s' }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.14)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-          >
-            ✈️ I Was Invited to a Trip
-            <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.75, marginTop: 4 }}>Join the group microsite</div>
-          </button>
         </div>
 
         <div style={{ marginTop: 48, display: 'flex', justifyContent: 'center', gap: 28, flexWrap: 'wrap' }}>
