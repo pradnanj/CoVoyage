@@ -19,13 +19,22 @@ const FALLBACK_POSTCARD = {
   hashtag: "#NashvilleCrew2026",
 };
 
+const ANTHROPIC_KEY = () => import.meta.env.VITE_ANTHROPIC_API_KEY || '';
+const ANTHROPIC_HEADERS = () => ({
+  "Content-Type": "application/json",
+  "x-api-key": ANTHROPIC_KEY(),
+  "anthropic-version": "2023-06-01",
+  "anthropic-dangerous-direct-browser-access": "true",
+});
+
 async function claudeCaption(label, day, tag) {
+  if (!ANTHROPIC_KEY()) return null;
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: ANTHROPIC_HEADERS(),
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 120,
         system: `You write warm, specific, funny photo captions for family travel memories.
 Trip: Nashville TN, Jun 14–18 2026, 13 people across 4 families.
@@ -51,6 +60,7 @@ const FALLBACK_CAPTIONS = {
 };
 
 async function claudePostcard(photos) {
+  if (!ANTHROPIC_KEY()) return FALLBACK_POSTCARD;
   const captionSummaries = photos
     .filter(p => p.caption)
     .map(p => `"${p.label}": ${p.caption}`)
@@ -61,9 +71,9 @@ async function claudePostcard(photos) {
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: ANTHROPIC_HEADERS(),
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 500,
         system: `You create warm, poetic trip memorabilia text for family travel scrapbooks. Write in editorial travel-memoir style — specific, evocative, personal.`,
         messages: [{

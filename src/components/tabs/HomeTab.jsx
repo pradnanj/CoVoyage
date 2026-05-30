@@ -2,17 +2,49 @@ import { useState } from 'react';
 import { M, sans, serif, TRIP, TYPE_COLORS } from '../../constants.js';
 import { Card, SectionTitle, Tag, Av, PrimaryBtn } from '../shared.jsx';
 
-const DISCOUNT_TARGET = TRIP.discountRooms;
+// Destination → Unsplash background photo mapping
+const DEST_PHOTOS = {
+  'orlando':       'https://images.unsplash.com/photo-1575089976121-8ed7b2a54265?w=1200&q=60',
+  'miami':         'https://images.unsplash.com/photo-1514214246283-d427a95c5d2f?w=1200&q=60',
+  'las vegas':     'https://images.unsplash.com/photo-1473091534298-04dcbce3278c?w=1200&q=60',
+  'new york':      'https://images.unsplash.com/photo-1518235506717-e1ed3306a89b?w=1200&q=60',
+  'chicago':       'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1200&q=60',
+  'los angeles':   'https://images.unsplash.com/photo-1580655653885-65763b2597d0?w=1200&q=60',
+  'nashville':     'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=1200&q=60',
+  'miami':         'https://images.unsplash.com/photo-1514214246283-d427a95c5d2f?w=1200&q=60',
+  'honolulu':      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1200&q=60',
+  'seattle':       'https://images.unsplash.com/photo-1502175353174-a7a70e73b362?w=1200&q=60',
+  'san francisco': 'https://images.unsplash.com/photo-1501594907352-04cda38ebc29?w=1200&q=60',
+  'denver':        'https://images.unsplash.com/photo-1548438294-1ad5d5f4f063?w=1200&q=60',
+  'boston':        'https://images.unsplash.com/photo-1569052259726-da90e0f3b6a7?w=1200&q=60',
+  'atlanta':       'https://images.unsplash.com/photo-1575505586569-646b2ca898fc?w=1200&q=60',
+  'dallas':        'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=1200&q=60',
+  'houston':       'https://images.unsplash.com/photo-1570168007204-dfb528c6958f?w=1200&q=60',
+  'phoenix':       'https://images.unsplash.com/photo-1558618047-3c8c76ca7d13?w=1200&q=60',
+  'san diego':     'https://images.unsplash.com/photo-1538970272646-f61fabb3a8a2?w=1200&q=60',
+  'default':       'https://images.unsplash.com/photo-1516339901601-2e1b62dc0c45?w=1200&q=60',
+};
+
+function getDestPhoto(destination = '') {
+  const d = destination.toLowerCase();
+  for (const [key, url] of Object.entries(DEST_PHOTOS)) {
+    if (key !== 'default' && d.includes(key)) return url;
+  }
+  return DEST_PHOTOS.default;
+}
 
 export default function HomeTab({ activities, hotels, members, tripInfo, onUpvote, onDownvote, onCommentAdd }) {
   const [commentInputs, setCommentInputs] = useState({});
   const bookedRooms = hotels.reduce((acc, h) => acc + h.bookedBy.length, 0);
-  const pct = Math.min((bookedRooms / DISCOUNT_TARGET) * 100, 100);
-  const discountActive = bookedRooms >= DISCOUNT_TARGET;
+
+  const discountTarget = tripInfo?.discountRooms || TRIP.discountRooms;
+  const discountPct    = tripInfo?.discountPct   || TRIP.discountPct;
+  const pct = Math.min((bookedRooms / discountTarget) * 100, 100);
+  const discountActive = bookedRooms >= discountTarget;
 
   // Sort activities by net votes descending — reactively re-sorts on every vote
   const topActivities = [...activities]
-    .sort((a, b) => (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes))
+    .sort((a, b) => ((b.upvotes || 0) - (b.downvotes || 0)) - ((a.upvotes || 0) - (a.downvotes || 0)))
     .slice(0, 5);
 
   const tripName = tripInfo?.name || TRIP.name;
@@ -25,10 +57,9 @@ export default function HomeTab({ activities, hotels, members, tripInfo, onUpvot
     <div style={{ padding: '0 0 40px' }}>
       {/* Hero Banner */}
       <div style={{
-        background: `linear-gradient(135deg, ${M.red} 0%, ${M.redDark} 60%, #2d0a0a 100%)`,
         padding: '36px 28px', marginBottom: 28, color: M.white,
-        backgroundImage: `linear-gradient(135deg, rgba(168,38,42,0.97) 0%, rgba(45,10,10,0.97) 100%), url('https://images.unsplash.com/photo-1516339901601-2e1b62dc0c45?w=1200&q=60')`,
-        backgroundSize: 'cover', backgroundBlendMode: 'multiply',
+        backgroundImage: `linear-gradient(135deg, rgba(168,38,42,0.93) 0%, rgba(45,10,10,0.93) 100%), url('${getDestPhoto(tripDestination)}')`,
+        backgroundSize: 'cover', backgroundPosition: 'center',
       }}>
         <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', opacity: 0.7, marginBottom: 6 }}>Marriott Bonvoy</div>
         <h1 style={{ fontFamily: serif, fontSize: 30, fontWeight: 400, marginBottom: 6 }}>{tripName}</h1>
@@ -56,14 +87,14 @@ export default function HomeTab({ activities, hotels, members, tripInfo, onUpvot
               <SectionTitle>🏨 Room Booking Progress</SectionTitle>
               <div style={{ fontSize: 13, color: M.gray5, marginTop: 2 }}>
                 {discountActive
-                  ? <span style={{ color: M.green, fontWeight: 700 }}>🎉 {TRIP.discountPct}% Group Discount Unlocked!</span>
-                  : <span>{DISCOUNT_TARGET - bookedRooms} more rooms needed for <strong style={{ color: M.red }}>{TRIP.discountPct}% off</strong></span>
+                  ? <span style={{ color: M.green, fontWeight: 700 }}>🎉 {discountPct}% Group Discount Unlocked!</span>
+                  : <span>{discountTarget - bookedRooms} more rooms needed for <strong style={{ color: M.red }}>{discountPct}% off</strong></span>
                 }
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 22, fontWeight: 700, color: discountActive ? M.green : M.red }}>{bookedRooms}</div>
-              <div style={{ fontSize: 11, color: M.gray4 }}>of {DISCOUNT_TARGET} rooms</div>
+              <div style={{ fontSize: 11, color: M.gray4 }}>of {discountTarget} rooms</div>
             </div>
           </div>
           {/* Progress bar */}
@@ -129,7 +160,7 @@ export default function HomeTab({ activities, hotels, members, tripInfo, onUpvot
 
 function ActivityCard({ act, members, onUpvote, onDownvote, onCommentAdd, commentInputs, setCommentInputs }) {
   const [showComments, setShowComments] = useState(false);
-  const netVotes = act.upvotes - act.downvotes;
+  const netVotes = (act.upvotes || 0) - (act.downvotes || 0);
 
   return (
     <Card highlight={act.hotelPriority} style={{ padding: 0, overflow: 'hidden' }}>
@@ -164,13 +195,13 @@ function ActivityCard({ act, members, onUpvote, onDownvote, onCommentAdd, commen
               {act.deadline && <span>📅 Book by {act.deadline}</span>}
             </div>
             {/* Voter avatars */}
-            {act.voters.length > 0 && (
+            {(act.voters || []).length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 10 }}>
-                {act.voters.slice(0, 4).map(name => {
+                {(act.voters || []).slice(0, 4).map(name => {
                   const m = members.find(m => m.name === name);
                   return <Av key={name} name={name} size={22} color={m?.color} />;
                 })}
-                {act.voters.length > 4 && <span style={{ fontSize: 11, color: M.gray4 }}>+{act.voters.length - 4} more</span>}
+                {(act.voters || []).length > 4 && <span style={{ fontSize: 11, color: M.gray4 }}>+{(act.voters || []).length - 4} more</span>}
               </div>
             )}
           </div>
@@ -179,11 +210,11 @@ function ActivityCard({ act, members, onUpvote, onDownvote, onCommentAdd, commen
         {/* Comments section */}
         <div style={{ borderTop: `1px solid ${M.gray2}`, marginTop: 12, paddingTop: 10 }}>
           <button onClick={() => setShowComments(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: M.gray5, padding: 0 }}>
-            💬 {act.comments.length} comment{act.comments.length !== 1 ? 's' : ''} {showComments ? '▲' : '▼'}
+            💬 {(act.comments || []).length} comment{(act.comments || []).length !== 1 ? 's' : ''} {showComments ? '▲' : '▼'}
           </button>
           {showComments && (
             <div style={{ marginTop: 8 }}>
-              {act.comments.map((c, i) => (
+              {(act.comments || []).map((c, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <Av name={c.user} size={26} color={members.find(m => m.name === c.user)?.color} />
                   <div style={{ background: M.gray1, borderRadius: 10, padding: '6px 10px', flex: 1 }}>

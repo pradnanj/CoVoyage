@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { M, sans, serif, HOTELS, TRIP } from '../constants.js';
 import { PrimaryBtn, GhostBtn } from './shared.jsx';
+import { geocodeCity } from '../services/locations.js';
+import { fetchMarriottHotels } from '../services/marriottHotels.js';
 
 const STEPS = ['Welcome', 'Sign In', 'Your Room', 'Book Hotel', 'Flight Info', 'All Set!'];
 
@@ -46,9 +48,43 @@ export default function AttendeeOnboarding({ onComplete, tripInfo: propTripInfo,
     organizerName: '',
     ...propTripInfo,
   };
-  const liveHotels = propHotels && propHotels.length > 0 ? propHotels : HOTELS;
 
   const [step, setStep] = useState(startStep);
+
+  // Real Marriott hotels near the trip destination
+  const [realHotels, setRealHotels] = useState([]);
+  const [hotelsLoading, setHotelsLoading] = useState(false);
+
+  useEffect(() => {
+    if (step !== 3) return;
+    const dest = liveTripInfo.destination;
+    if (!dest) return;
+    let cancelled = false;
+    setHotelsLoading(true);
+
+    geocodeCity(dest).then(async coords => {
+      if (cancelled) return;
+      const fetched = await fetchMarriottHotels(
+        coords ? coords.lat : 28.5383,
+        coords ? coords.lng : -81.3792
+      );
+      // Merge DynamoDB booking counts from propHotels if available
+      const merged = fetched.map(rh => {
+        const existing = (propHotels || []).find(ph => ph.id === rh.id);
+        return existing ? { ...rh, bookedBy: existing.bookedBy || [] } : rh;
+      });
+      if (!cancelled) { setRealHotels(merged); setHotelsLoading(false); }
+    }).catch(() => {
+      if (!cancelled) setHotelsLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [step, liveTripInfo.destination]);
+
+  // Use real hotels when available, else fall back to prop/static hotels
+  const liveHotels = realHotels.length > 0
+    ? realHotels
+    : (propHotels && propHotels.length > 0 ? propHotels : HOTELS);
   const [form, setForm] = useState(() => {
     const nameParts = (propCurrentUser || '').trim().split(' ');
     return {
@@ -236,7 +272,12 @@ export default function AttendeeOnboarding({ onComplete, tripInfo: propTripInfo,
           {step === 3 && (
             <div>
               <h2 style={{ fontFamily: serif, fontSize: 24, color: M.black, marginBottom: 4 }}>Book Your Room</h2>
-              <p style={{ color: M.gray5, marginBottom: 6, fontSize: 14 }}>Dates: <strong>{liveTripInfo.startDate} – {liveTripInfo.endDate}</strong> (set by organizer)</p>
+              <p style={{ color: M.gray5, marginBottom: 4, fontSize: 14 }}>Dates: <strong>{liveTripInfo.startDate} – {liveTripInfo.endDate}</strong> (set by organizer)</p>
+              {liveTripInfo.destination && (
+                <p style={{ color: M.gray4, marginBottom: 12, fontSize: 13 }}>
+                  📍 Marriott hotels near <strong style={{ color: M.red }}>{liveTripInfo.destination}</strong>
+                </p>
+              )}
 
               {/* Group Discount Bar */}
               <div style={{ background: '#fff5f5', border: `1px solid #fdd`, borderRadius: 10, padding: '10px 14px', marginBottom: 20, fontSize: 13 }}>
@@ -244,41 +285,72 @@ export default function AttendeeOnboarding({ onComplete, tripInfo: propTripInfo,
                 <span style={{ color: M.gray5 }}> — {totalNeeded - bookedRooms} more needed for {liveTripInfo.discountPct}% group discount!</span>
               </div>
 
-              {/* Who booked where — only show if there are real members */}
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: M.gray5, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Available Hotels</div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
-                {liveHotels.map(h => (
-                  <div
-                    key={h.id}
-                    onClick={() => set('hotel', h.id)}
-                    style={{
-                      border: `2px solid ${form.hotel === h.id ? M.red : h.highlight ? M.gold : M.gray2}`,
-                      borderRadius: 12, padding: 16, cursor: 'pointer',
-                      background: form.hotel === h.id ? '#fff5f5' : h.highlight ? '#fffdf2' : M.white,
-                      transition: 'all 0.2s', display: 'flex', gap: 12, alignItems: 'flex-start', position: 'relative',
-                    }}
-                  >
-                    {h.highlight && (
-                      <div style={{ position: 'absolute', top: -1, left: 12, background: M.gold, color: M.white, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: '0 0 6px 6px' }}>
-                        ★ Organizer's Hotel
+                {hotelsLoading ? (
+                  <>
+                    {[1, 2, 3].map(n => (
+                      <div key={n} style={{ border: `2px solid ${M.gray2}`, borderRadius: 12, padding: 16, background: M.gray1, display: 'flex', gap: 12, alignItems: 'center' }}>
+                        <div style={{ width: 68, height: 52, borderRadius: 8, background: M.gray2, flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ height: 14, background: M.gray2, borderRadius: 4, marginBottom: 8, width: '65%' }} />
+                          <div style={{ height: 11, background: M.gray2, borderRadius: 4, width: '40%' }} />
+                        </div>
                       </div>
-                    )}
-                    <img src={h.image} alt={h.name} style={{ width: 68, height: 52, borderRadius: 8, objectFit: 'cover', flexShrink: 0, marginTop: h.highlight ? 8 : 0 }} />
-                    <div style={{ flex: 1, marginTop: h.highlight ? 8 : 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: M.black }}>{h.name}</div>
-                      <div style={{ fontSize: 12, color: M.gray4, marginBottom: 4 }}>{h.distance}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        <span style={{ fontWeight: 700, color: M.red, fontSize: 15 }}>${h.rate}<span style={{ fontWeight: 400, fontSize: 11, color: M.gray4 }}>/night</span></span>
-                        <span style={{ fontSize: 12, color: M.gray4, textDecoration: 'line-through' }}>${h.originalRate}</span>
-                        {h.bookedBy.length > 0 && <span style={{ fontSize: 11, background: M.gray1, borderRadius: 10, padding: '2px 8px', color: M.gray5 }}>{h.bookedBy.length} crew member{h.bookedBy.length !== 1 ? 's' : ''} here</span>}
-                      </div>
+                    ))}
+                    <div style={{ textAlign: 'center', fontSize: 13, color: M.gray4, marginTop: 4 }}>
+                      🔍 Finding Marriott hotels near {liveTripInfo.destination}…
                     </div>
-                    {form.hotel === h.id && <div style={{ color: M.red, fontSize: 20, flexShrink: 0 }}>✓</div>}
-                  </div>
-                ))}
+                  </>
+                ) : (
+                  liveHotels.map(h => (
+                    <div
+                      key={h.id}
+                      onClick={() => set('hotel', h.id)}
+                      style={{
+                        border: `2px solid ${form.hotel === h.id ? M.red : h.highlight ? M.gold : M.gray2}`,
+                        borderRadius: 12, padding: 16, cursor: 'pointer',
+                        background: form.hotel === h.id ? '#fff5f5' : h.highlight ? '#fffdf2' : M.white,
+                        transition: 'all 0.2s', display: 'flex', gap: 12, alignItems: 'flex-start', position: 'relative',
+                      }}
+                    >
+                      {h.highlight && (
+                        <div style={{ position: 'absolute', top: -1, left: 12, background: M.gold, color: '#5a3e00', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: '0 0 6px 6px' }}>
+                          ★ Organizer's Hotel
+                        </div>
+                      )}
+                      <img
+                        src={h.image}
+                        alt={h.name}
+                        style={{ width: 68, height: 52, borderRadius: 8, objectFit: 'cover', flexShrink: 0, marginTop: h.highlight ? 8 : 0 }}
+                        onError={e => { e.target.src = 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&q=80'; }}
+                      />
+                      <div style={{ flex: 1, marginTop: h.highlight ? 8 : 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: M.black, marginBottom: 2 }}>{h.name}</div>
+                        <div style={{ fontSize: 12, color: M.gray4, marginBottom: 4 }}>📍 {h.distance}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, color: M.red, fontSize: 15 }}>${h.rate}<span style={{ fontWeight: 400, fontSize: 11, color: M.gray4 }}>/night</span></span>
+                          <span style={{ fontSize: 12, color: M.gray4, textDecoration: 'line-through' }}>${h.originalRate}</span>
+                          <span style={{ fontSize: 11, color: M.gold, fontWeight: 600 }}>⭐ {h.stars}</span>
+                          {h.bookedBy && h.bookedBy.length > 0 && (
+                            <span style={{ fontSize: 11, background: M.gray1, borderRadius: 10, padding: '2px 8px', color: M.gray5 }}>
+                              {h.bookedBy.length} crew member{h.bookedBy.length !== 1 ? 's' : ''} here
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ marginTop: 5, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {(h.amenities || []).slice(0, 3).map(a => (
+                            <span key={a} style={{ fontSize: 11, background: M.gray1, color: M.gray5, borderRadius: 10, padding: '2px 7px' }}>{a}</span>
+                          ))}
+                        </div>
+                      </div>
+                      {form.hotel === h.id && <div style={{ color: M.red, fontSize: 20, flexShrink: 0 }}>✓</div>}
+                    </div>
+                  ))
+                )}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
                 <div style={{ display: 'flex', gap: 12 }}>

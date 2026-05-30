@@ -122,51 +122,117 @@ export function GhostBtn({ children, onClick, style = {} }) {
 }
 
 // ─── AI SEARCH / CONCIERGE ────────────────────────────────────────────────────
-export function AISearch({ context = "", placeholder = "Ask me anything about your trip…" }) {
+export function AISearch({ context = "", placeholder = "Ask me anything about your trip…", destination = "", onAddActivity = null }) {
   const [q, setQ] = useState("");
   const [ans, setAns] = useState(null);
+  const [activityResults, setActivityResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
 
+  // Parse destination from context string if not passed directly ("Nashville, TN trip Jun 15 – Jun 20")
+  const dest = destination || (() => {
+    const m = context.match(/^([^t]+?)(?:\s+trip|\s+$)/);
+    return m ? m[1].trim() : "your destination";
+  })();
+
   const SUGGESTIONS = [
-    "Best hotel activities for kids in Orlando?",
+    `Best activities in ${dest}?`,
     "Which activities are free or under $20?",
     "What should we do on a rainy day?",
     "How do we maximize Bonvoy points?",
-    "Best restaurants for a group of 18?",
-    "How far is Disney from the Marriott World Center?",
+    `Best restaurants for a group in ${dest}?`,
+    `Family-friendly things to do in ${dest}?`,
   ];
+
+  const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || '';
+  const FALLBACK = `The Marriott hotel's pool complex is a great starting point — typically free for guests. For off-property fun in ${dest || 'your destination'}, check local attraction sites or ask the hotel concierge for group discounts and Bonvoy partner perks.`;
 
   async function ask(question) {
     if (!question.trim()) return;
-    setLoading(true); setAns(null); setOpen(true);
+    setLoading(true); setAns(null); setActivityResults([]); setOpen(true);
+
+    if (!ANTHROPIC_KEY) {
+      setAns(`To enable AI answers, add your Anthropic API key as VITE_ANTHROPIC_API_KEY in .env.local and restart the dev server.`);
+      setLoading(false);
+      return;
+    }
+
+    // When onAddActivity is wired (Activities tab), ask for structured JSON list
+    const isActivityMode = typeof onAddActivity === 'function';
+
+    const systemPrompt = isActivityMode
+      ? `You are a travel activity recommender for Crewfare, a group trip planning app.
+Trip context: ${context || `visiting ${dest}`}
+Destination: ${dest || 'the destination'}
+CRITICAL: Return ONLY a raw JSON array. No markdown, no code fences, no explanation text before or after. Just the JSON array starting with [ and ending with ].
+Each item: { "title": string, "category": one of [Outdoor,Culture,Food,Entertainment,Sports,Wellness,Adventure,Shopping,Nightlife], "emoji": single emoji string, "price": number (0 if free), "description": string (1 sentence max), "duration": string e.g. "2–3 hrs" }
+Return 5–8 items. Be specific to ${dest || 'the destination'}. Include local favourites and Marriott hotel activities.`
+      : `You are the Marriott Bonvoy AI Concierge for Crewfare, a group trip planning app.
+Trip context: ${context || `visiting ${dest}`}
+Destination: ${dest || 'the destination'}
+IMPORTANT: Suggest activities, restaurants, and attractions specific to ${dest || 'the destination'}. Prioritize Marriott on-site amenities first, then nearby local attractions.
+Respond in 2–4 sentences. Be specific with names, prices, and Bonvoy tips.`;
+
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 400,
-          system: `You are the Marriott Bonvoy AI Concierge for Crewfare, a group trip planning app.
-Group: 5 families, 18 travelers, visiting Orlando FL Jul 12–18 2026.
-Staying primarily at Orlando World Center Marriott ($289/nt, hotel shuttle to Disney).
-Nearby: Disney World, Universal Studios, Kennedy Space Center, Cocoa Beach, SeaWorld.
-On-site: Pool complex, Mikado restaurant (teppanyaki), Spa, Kids Club.
-${context}
-IMPORTANT: Prioritize activities AT or offered by the Marriott World Center (pool, spa, restaurants, shuttle, kids club) and mention them first. Then cover nearby attractions.
-Respond in 2–4 sentences. Be specific with names, prices, and Bonvoy tips.`,
+          model: "claude-sonnet-4-5",
+          max_tokens: 1200,
+          system: systemPrompt,
           messages: [{ role: "user", content: question }],
         }),
       });
       const data = await res.json();
-      setAns(data.content?.[0]?.text || FALLBACK);
-    } catch {
+      if (data.error) throw new Error(data.error.message || data.error.type || JSON.stringify(data.error));
+      const text = data.content?.[0]?.text || '';
+
+      if (isActivityMode) {
+        // Extract JSON array — handle code fences or raw JSON
+        const stripped = text.replace(/```json\n?|```/g, '').trim();
+        const match = stripped.match(/\[[\s\S]*\]/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[0]);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setActivityResults(parsed.map((a, i) => ({
+                id: `a-ai-${Date.now()}-${i}`,
+                title: a.title || 'Activity',
+                category: a.category || 'Outdoor',
+                emoji: a.emoji || '✨',
+                price: parseFloat(a.price) || 0,
+                priceType: 'per person',
+                description: a.description || '',
+                duration: a.duration || '',
+                dates: [], times: [], ageMin: null, ageMax: null,
+                deadline: null, cancellation: 'Check with venue',
+                upvotes: 0, downvotes: 0, comments: [], voters: [],
+                hotelPriority: false, booked: false,
+              })));
+            } else {
+              setAns(text);
+            }
+          } catch {
+            setAns(text);
+          }
+        } else {
+          setAns(text);
+        }
+      } else {
+        setAns(text || FALLBACK);
+      }
+    } catch (err) {
+      console.error('AISearch error:', err?.message);
       setAns(FALLBACK);
     }
     setLoading(false);
   }
-
-  const FALLBACK = "The Marriott World Center's pool complex is perfect for a family day — free for hotel guests with a kids splash zone, waterslide, and swim-up bar. For off-property, Disney World's Magic Kingdom ($109/person) is a 10-min shuttle ride and the most popular pick with the group right now.";
 
   return (
     <div style={{ marginBottom: 0 }}>
@@ -227,12 +293,56 @@ Respond in 2–4 sentences. Be specific with names, prices, and Bonvoy tips.`,
               <div style={{ fontFamily: sans, fontSize: 10, fontWeight: 700, color: M.red, letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 5 }}>Marriott AI Concierge</div>
               <div style={{ fontFamily: sans, fontSize: 13, color: M.black, lineHeight: 1.7 }}>{ans}</div>
               <button
-                onClick={() => { setAns(null); setQ(""); setOpen(false); }}
+                onClick={() => { setAns(null); setActivityResults([]); setQ(""); setOpen(false); }}
                 style={{ fontFamily: sans, fontSize: 11, color: M.gray4, background: "none", border: "none", cursor: "pointer", marginTop: 8, textDecoration: "underline" }}
               >
                 Clear
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {activityResults.length > 0 && (
+        <div style={{ border: `1.5px solid ${M.gray2}`, borderTop: "none", background: M.white, borderRadius: "0 0 10px 10px", boxShadow: "0 8px 24px rgba(0,0,0,0.12)", overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px 6px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontFamily: sans, fontSize: 10, fontWeight: 700, color: M.red, letterSpacing: ".1em", textTransform: "uppercase" }}>
+              ✦ {activityResults.length} AI-suggested activities — click Add to add to board
+            </div>
+            <button
+              onClick={() => { setActivityResults([]); setQ(""); setOpen(false); }}
+              style={{ fontFamily: sans, fontSize: 11, color: M.gray4, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+            >
+              Clear
+            </button>
+          </div>
+          <div style={{ maxHeight: 380, overflowY: "auto", display: "flex", flexDirection: "column", gap: 0 }}>
+            {activityResults.map((act, i) => (
+              <div
+                key={act.id}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderTop: i === 0 ? `1px solid ${M.gray2}` : `1px solid ${M.gray2}`, background: M.white }}
+              >
+                <span style={{ fontSize: 24, flexShrink: 0 }}>{act.emoji}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: M.black, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{act.title}</div>
+                  <div style={{ fontSize: 12, color: M.gray4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{act.description}</div>
+                  <div style={{ fontSize: 11, color: M.gray4, marginTop: 2 }}>
+                    {act.category}{act.duration ? ` · ${act.duration}` : ''}{act.price === 0 ? ' · Free' : ` · $${act.price}/person`}
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (onAddActivity) {
+                      onAddActivity({ ...act, suggestedBy: 'AI Concierge' });
+                      setActivityResults(r => r.filter(a => a.id !== act.id));
+                    }
+                  }}
+                  style={{ background: M.red, color: M.white, border: "none", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontFamily: sans, fontSize: 12, fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" }}
+                >
+                  + Add
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}

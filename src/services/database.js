@@ -2,7 +2,7 @@
 // Uses localStorage by default, switches to DynamoDB when AWS credentials are provided
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 
 const AWS_ACCESS_KEY_ID = import.meta.env.VITE_AWS_ACCESS_KEY_ID;
 const AWS_SECRET_ACCESS_KEY = import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
@@ -72,7 +72,7 @@ export const saveTrip = async (tripData) => {
     try {
       await docClient.send(new PutCommand({ TableName: "CrewfareTrips", Item: trip }));
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error);
+      console.error("DynamoDB error, falling back to localStorage:", error.name);
       localStorage_save('trips', trip.tripId, trip);
     }
   } else {
@@ -87,7 +87,7 @@ export const getTrip = async (tripId) => {
       const response = await docClient.send(new GetCommand({ TableName: "CrewfareTrips", Key: { tripId } }));
       return response.Item;
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error);
+      console.error("DynamoDB error, falling back to localStorage:", error.name);
       return localStorage_get('trips', tripId);
     }
   }
@@ -107,7 +107,7 @@ export const saveMember = async (tripId, memberData) => {
     try {
       await docClient.send(new PutCommand({ TableName: "CrewfareMembers", Item: member }));
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error);
+      console.error("DynamoDB error, falling back to localStorage:", error.name);
       localStorage_save('members', member.memberId, member);
     }
   } else {
@@ -121,12 +121,13 @@ export const getMembers = async (tripId) => {
     try {
       const response = await docClient.send(new QueryCommand({
         TableName: "CrewfareMembers",
+        IndexName: "tripId-index",
         KeyConditionExpression: "tripId = :tripId",
         ExpressionAttributeValues: { ":tripId": tripId }
       }));
       return response.Items || [];
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error);
+      console.error("DynamoDB error, falling back to localStorage:", error.name);
       return localStorage_getAll('members').filter(m => m.tripId === tripId);
     }
   }
@@ -146,7 +147,7 @@ export const saveHotel = async (tripId, hotelData) => {
     try {
       await docClient.send(new PutCommand({ TableName: "CrewfareHotels", Item: hotel }));
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error);
+      console.error("DynamoDB error, falling back to localStorage:", error.name);
       localStorage_save('hotels', hotel.hotelId, hotel);
     }
   } else {
@@ -160,12 +161,13 @@ export const getHotels = async (tripId) => {
     try {
       const response = await docClient.send(new QueryCommand({
         TableName: "CrewfareHotels",
+        IndexName: "tripId-index",
         KeyConditionExpression: "tripId = :tripId",
         ExpressionAttributeValues: { ":tripId": tripId }
       }));
       return response.Items || [];
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error);
+      console.error("DynamoDB error, falling back to localStorage:", error.name);
       return localStorage_getAll('hotels').filter(h => h.tripId === tripId);
     }
   }
@@ -185,7 +187,7 @@ export const saveActivity = async (tripId, activityData) => {
     try {
       await docClient.send(new PutCommand({ TableName: "CrewfareActivities", Item: activity }));
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error);
+      console.error("DynamoDB error, falling back to localStorage:", error.name);
       localStorage_save('activities', activity.activityId, activity);
     }
   } else {
@@ -199,16 +201,70 @@ export const getActivities = async (tripId) => {
     try {
       const response = await docClient.send(new QueryCommand({
         TableName: "CrewfareActivities",
+        IndexName: "tripId-index",
         KeyConditionExpression: "tripId = :tripId",
         ExpressionAttributeValues: { ":tripId": tripId }
       }));
       return response.Items || [];
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error);
+      console.error("DynamoDB error, falling back to localStorage:", error.name);
       return localStorage_getAll('activities').filter(a => a.tripId === tripId);
     }
   }
   return localStorage_getAll('activities').filter(a => a.tripId === tripId);
+};
+
+// ───── RESET ALL DATA ──────────────────────────────────────────
+// Clears all crewfare localStorage keys AND deletes all DynamoDB rows
+export const resetAllData = async () => {
+  // 1. Wipe all crewfare localStorage keys
+  const keysToRemove = Object.keys(window.localStorage).filter(k => k.startsWith('crewfare'));
+  keysToRemove.forEach(k => window.localStorage.removeItem(k));
+
+  // 2. Also wipe sessionStorage
+  ['crewfare_user', 'crewfare_view', 'crewfare_trip'].forEach(k => sessionStorage.removeItem(k));
+
+  if (!USE_DYNAMODB || !docClient) return { tables: [], rows: 0 };
+
+  // 3. For each DynamoDB table, scan all items and delete them
+  const TABLES = [
+    { name: 'CrewfareTrips',      pk: 'tripId',      sk: null },
+    { name: 'CrewfareMembers',    pk: 'memberId',    sk: null },
+    { name: 'CrewfareHotels',     pk: 'hotelId',     sk: null },
+    { name: 'CrewfareActivities', pk: 'activityId',  sk: null },
+  ];
+
+  let totalDeleted = 0;
+  const results = [];
+
+  for (const table of TABLES) {
+    let deleted = 0;
+    let lastKey = undefined;
+    try {
+      do {
+        const scanRes = await docClient.send(new ScanCommand({
+          TableName: table.name,
+          ProjectionExpression: table.pk,
+          ExclusiveStartKey: lastKey,
+          Limit: 100,
+        }));
+        const items = scanRes.Items || [];
+        for (const item of items) {
+          const key = { [table.pk]: item[table.pk] };
+          if (table.sk && item[table.sk]) key[table.sk] = item[table.sk];
+          await docClient.send(new DeleteCommand({ TableName: table.name, Key: key }));
+          deleted++;
+        }
+        lastKey = scanRes.LastEvaluatedKey;
+      } while (lastKey);
+      results.push({ table: table.name, deleted, status: 'ok' });
+    } catch (err) {
+      results.push({ table: table.name, deleted, status: `error: ${err.message}` });
+    }
+    totalDeleted += deleted;
+  }
+
+  return { tables: results, rows: totalDeleted };
 };
 
 export default {
@@ -216,4 +272,5 @@ export default {
   saveMember, getMembers,
   saveHotel, getHotels,
   saveActivity, getActivities,
+  resetAllData,
 };

@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { M, sans, serif, CATEGORY_COLORS } from '../../constants.js';
 import { Card, SectionTitle, Tag, Av, PrimaryBtn, GhostBtn, AISearch } from '../shared.jsx';
 
 const FOOD_PREFS = ['Gluten-Free', 'Vegan', 'Vegetarian', 'Nut Allergy', 'Dairy-Free', 'Halal', 'Kosher', 'No Spice'];
 
-export default function ActivitiesTab({ activities, currentUser, onUpvote, onDownvote, onCommentAdd, onBook, onAddActivity }) {
+export default function ActivitiesTab({ activities, currentUser, tripInfo = {}, onUpvote, onDownvote, onCommentAdd, onBook, onAddActivity }) {
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('All');
   const [sort, setSort] = useState('popular');
@@ -14,8 +14,21 @@ export default function ActivitiesTab({ activities, currentUser, onUpvote, onDow
   const [foodPrefs, setFoodPrefs] = useState([]);
   const [mealTimes, setMealTimes] = useState({ breakfast: '8:00 AM', lunch: '12:30 PM', dinner: '7:00 PM' });
   const [allergyNote, setAllergyNote] = useState('');
-  const [showAddActivity, setShowAddActivity] = useState(false);
-  const [newActivity, setNewActivity] = useState({ title: '', category: 'Outdoor', price: '', description: '', emoji: '✨' });
+  const [bookingActivity, setBookingActivity] = useState(null); // activity being booked
+
+  // Generate trip days for the date picker
+  const tripDays = useMemo(() => {
+    const days = [];
+    if (!tripInfo.startISO || !tripInfo.endISO) return days;
+    const start = new Date(tripInfo.startISO + 'T00:00:00');
+    const end = new Date(tripInfo.endISO + 'T00:00:00');
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      days.push(`${dayNames[d.getDay()]}, ${monthNames[d.getMonth()]} ${d.getDate()}`);
+    }
+    return days;
+  }, [tripInfo.startISO, tripInfo.endISO]);
 
   const categories = ['All', ...new Set(activities.map(a => a.category))];
 
@@ -36,8 +49,13 @@ export default function ActivitiesTab({ activities, currentUser, onUpvote, onDow
       {/* Header */}
       <div style={{ background: M.black, padding: '20px 20px 0', marginBottom: 0 }}>
         <h2 style={{ fontFamily: serif, color: M.white, fontSize: 22, marginBottom: 6 }}>Activity Brainstorming</h2>
-        <p style={{ color: M.gray4, fontSize: 13, marginBottom: 16 }}>Discover, upvote, and comment on activities for your Orlando trip.</p>
-        <AISearch placeholder="Ask AI: 'Best activities for kids in Orlando…'" context="Orlando, FL family trip Jul 12–18" />
+        <p style={{ color: M.gray4, fontSize: 13, marginBottom: 16 }}>Discover, upvote, and comment on activities for your {tripInfo.destination || 'trip'} trip. Ask AI to get suggestions, then click <strong style={{ color: M.white }}>+ Add</strong> to add them to the board.</p>
+        <AISearch
+          placeholder={`Ask AI: 'Best activities in ${tripInfo.destination || 'your destination'}…'`}
+          context={`${tripInfo.destination || ''} trip${tripInfo.startDate ? ` ${tripInfo.startDate}` : ''}${tripInfo.endDate ? ` – ${tripInfo.endDate}` : ''}`}
+          destination={tripInfo.destination || ''}
+          onAddActivity={onAddActivity}
+        />
         {/* Priority badge hint */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 0 14px', fontSize: 12, color: M.gold }}>
           <span style={{ background: M.gold, color: '#5a3e00', borderRadius: 4, padding: '1px 6px', fontSize: 10, fontWeight: 700 }}>★ HOTEL</span>
@@ -65,7 +83,7 @@ export default function ActivitiesTab({ activities, currentUser, onUpvote, onDow
           ))}
         </div>
 
-        {/* Sort + Action row */}
+        {/* Sort row */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
           <select
             value={sort}
@@ -81,12 +99,6 @@ export default function ActivitiesTab({ activities, currentUser, onUpvote, onDow
             style={{ background: showFoodPrefs ? M.teal : M.gray1, color: showFoodPrefs ? M.white : M.gray5, border: 'none', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontFamily: sans, fontSize: 13, fontWeight: 600 }}
           >
             🍽 Food Preferences {foodPrefs.length > 0 && `(${foodPrefs.length})`}
-          </button>
-          <button
-            onClick={() => setShowAddActivity(v => !v)}
-            style={{ background: M.red, color: M.white, border: 'none', borderRadius: 8, padding: '7px 14px', cursor: 'pointer', fontFamily: sans, fontSize: 13, fontWeight: 600, marginLeft: 'auto' }}
-          >
-            + Submit Activity
           </button>
         </div>
 
@@ -131,82 +143,6 @@ export default function ActivitiesTab({ activities, currentUser, onUpvote, onDow
           </Card>
         )}
 
-        {/* Add Activity Panel */}
-        {showAddActivity && (
-          <Card style={{ marginBottom: 20, background: '#fff8f8' }}>
-            <SectionTitle>💡 Submit a New Activity Idea</SectionTitle>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 14 }}>
-              {[
-                { label: 'Emoji', field: 'emoji', placeholder: '🎡', style: { width: 80 } },
-                { label: 'Activity Name', field: 'title', placeholder: 'e.g. Airboat Tour' },
-                { label: 'Price per Person ($)', field: 'price', placeholder: '0 for free' },
-              ].map(({ label, field, placeholder, style: s }) => (
-                <div key={field} style={{ flex: s ? '0 0 80px' : '1 1 180px' }}>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 4 }}>{label}</label>
-                  <input
-                    value={newActivity[field]}
-                    onChange={e => setNewActivity(p => ({ ...p, [field]: e.target.value }))}
-                    placeholder={placeholder}
-                    style={{ ...(s || {}), width: '100%', padding: '9px 11px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none' }}
-                  />
-                </div>
-              ))}
-              <div style={{ flex: '1 1 140px' }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 4 }}>Category</label>
-                <select
-                  value={newActivity.category}
-                  onChange={e => setNewActivity(p => ({ ...p, category: e.target.value }))}
-                  style={{ width: '100%', padding: '9px 11px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none', background: M.white }}
-                >
-                  {Object.keys(CATEGORY_COLORS).map(c => <option key={c}>{c}</option>)}
-                </select>
-              </div>
-            </div>
-            <textarea
-              value={newActivity.description}
-              onChange={e => setNewActivity(p => ({ ...p, description: e.target.value }))}
-              placeholder="Brief description of the activity..."
-              rows={2}
-              style={{ width: '100%', marginTop: 10, padding: '9px 11px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, resize: 'vertical', outline: 'none' }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
-              <GhostBtn onClick={() => setShowAddActivity(false)}>Cancel</GhostBtn>
-              <PrimaryBtn
-                onClick={() => {
-                  if (!newActivity.title.trim()) return;
-                  const activity = {
-                    id: `a-${Date.now()}`,
-                    title: newActivity.title,
-                    category: newActivity.category,
-                    emoji: newActivity.emoji || '✨',
-                    price: parseFloat(newActivity.price) || 0,
-                    priceType: 'per person',
-                    description: newActivity.description,
-                    duration: '',
-                    dates: [],
-                    times: [],
-                    ageMin: null,
-                    ageMax: null,
-                    deadline: null,
-                    cancellation: '',
-                    upvotes: 0,
-                    downvotes: 0,
-                    comments: [],
-                    voters: [],
-                    hotelPriority: false,
-                    booked: false,
-                    suggestedBy: currentUser || 'Someone',
-                  };
-                  if (onAddActivity) onAddActivity(activity);
-                  setNewActivity({ title: '', category: 'Outdoor', price: '', description: '', emoji: '✨' });
-                  setShowAddActivity(false);
-                }}
-                disabled={!newActivity.title.trim()}
-              >Submit Idea</PrimaryBtn>
-            </div>
-          </Card>
-        )}
-
         {/* Activity Feed */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {filtered.map(act => (
@@ -216,7 +152,7 @@ export default function ActivitiesTab({ activities, currentUser, onUpvote, onDow
               onUpvote={onUpvote}
               onDownvote={onDownvote}
               onCommentAdd={onCommentAdd}
-              onBook={onBook}
+              onBook={() => setBookingActivity(act)}
               commentInputs={commentInputs}
               setCommentInputs={setCommentInputs}
               expanded={expandedId === act.id}
@@ -225,9 +161,93 @@ export default function ActivitiesTab({ activities, currentUser, onUpvote, onDow
           ))}
           {filtered.length === 0 && (
             <div style={{ textAlign: 'center', padding: '40px 20px', color: M.gray4, fontSize: 14 }}>
-              No activities match your filters. Try adjusting or submit your own!
+              No activities yet. Use the AI search above to discover activities for your destination!
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Book Activity Modal — fixed overlay, lives inside root div */}
+      {bookingActivity && (
+        <BookActivityModal
+          activity={bookingActivity}
+          tripDays={tripDays}
+          currentUser={currentUser}
+          onConfirm={(act, date, time) => {
+            if (onBook) onBook(act, date, time);
+            setBookingActivity(null);
+          }}
+          onCancel={() => setBookingActivity(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Book Activity Modal ──────────────────────────────────────────────────
+function BookActivityModal({ activity, tripDays, currentUser, onConfirm, onCancel }) {
+  const [selectedDate, setSelectedDate] = useState(tripDays[0] || '');
+  const [selectedTime, setSelectedTime] = useState('10:00 AM');
+
+  const TIME_SLOTS = [
+    '7:00 AM','8:00 AM','9:00 AM','10:00 AM','11:00 AM','12:00 PM',
+    '1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM','6:00 PM',
+    '7:00 PM','8:00 PM','9:00 PM',
+  ];
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: 20 }}>
+      <div style={{ background: M.white, borderRadius: 16, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+          <span style={{ fontSize: 32 }}>{activity.emoji}</span>
+          <div>
+            <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 700, color: M.black }}>{activity.title}</div>
+            <div style={{ fontSize: 12, color: M.gray4 }}>{activity.category}{activity.duration ? ` · ${activity.duration}` : ''}{activity.price === 0 ? ' · Free' : ` · $${activity.price}/person`}</div>
+          </div>
+        </div>
+        <p style={{ fontSize: 13, color: M.gray5, marginBottom: 20, lineHeight: 1.5 }}>{activity.description}</p>
+
+        {tripDays.length === 0 ? (
+          <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: '12px 14px', fontSize: 13, color: '#856404', marginBottom: 16 }}>
+            ⚠️ No trip dates set. Complete organizer onboarding to set trip dates.
+          </div>
+        ) : (
+          <>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: M.gray5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Select Date
+              </label>
+              <select
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none', background: M.white }}
+              >
+                {tripDays.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: M.gray5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Select Time
+              </label>
+              <select
+                value={selectedTime}
+                onChange={e => setSelectedTime(e.target.value)}
+                style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 8, fontFamily: sans, fontSize: 14, outline: 'none', background: M.white }}
+              >
+                {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <GhostBtn onClick={onCancel}>Cancel</GhostBtn>
+          <PrimaryBtn
+            onClick={() => onConfirm(activity, selectedDate, selectedTime)}
+            disabled={!selectedDate}
+          >
+            ✓ Confirm & Add to Itinerary
+          </PrimaryBtn>
         </div>
       </div>
     </div>
@@ -235,7 +255,7 @@ export default function ActivitiesTab({ activities, currentUser, onUpvote, onDow
 }
 
 function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, commentInputs, setCommentInputs, expanded, onToggleExpand }) {
-  const netVotes = act.upvotes - act.downvotes;
+  const netVotes = (act.upvotes || 0) - (act.downvotes || 0);
 
   return (
     <Card highlight={act.hotelPriority} style={{ padding: 0, overflow: 'hidden' }}>
@@ -293,12 +313,12 @@ function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, com
               </div>
             )}
             {/* Voter avatars */}
-            {act.voters.length > 0 && (
+            {(act.voters || []).length > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 10 }}>
-                {act.voters.slice(0, 5).map(name => (
+                {(act.voters || []).slice(0, 5).map(name => (
                   <Av key={name} name={name} size={22} />
                 ))}
-                {act.voters.length > 5 && <span style={{ fontSize: 11, color: M.gray4 }}>+{act.voters.length - 5}</span>}
+                {(act.voters || []).length > 5 && <span style={{ fontSize: 11, color: M.gray4 }}>+{(act.voters || []).length - 5}</span>}
               </div>
             )}
           </div>
@@ -307,11 +327,11 @@ function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, com
         {/* Comments */}
         <div style={{ borderTop: `1px solid ${M.gray2}`, marginTop: 12, paddingTop: 10 }}>
           <button onClick={onToggleExpand} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: M.gray5, padding: 0 }}>
-            💬 {act.comments.length} comment{act.comments.length !== 1 ? 's' : ''} {expanded ? '▲' : '▼'}
+            💬 {(act.comments || []).length} comment{(act.comments || []).length !== 1 ? 's' : ''} {expanded ? '▲' : '▼'}
           </button>
           {expanded && (
             <div style={{ marginTop: 10 }}>
-              {act.comments.map((c, i) => (
+              {(act.comments || []).map((c, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <Av name={c.user} size={26} />
                   <div style={{ background: M.gray1, borderRadius: 10, padding: '6px 10px', flex: 1 }}>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { M, sans, serif, TABS, ITINERARY, HOTELS, MEMBERS, TRIP, MOCK_PHOTOS } from '../constants.js';
 import { Av, SectionTitle, Tag, Card, PrimaryBtn, GhostBtn } from './shared.jsx';
 import OrganizerOnboarding from './OrganizerOnboarding.jsx';
@@ -8,6 +8,9 @@ import ActivitiesTab from './tabs/ActivitiesTab.jsx';
 import ItineraryTab from './tabs/ItineraryTab.jsx';
 import MemoriesTab from './tabs/MemoriesTab.jsx';
 import { useMembers, useHotels, useActivities } from '../hooks/useDatabase.js';
+import { geocodeCity } from '../services/locations.js';
+import { fetchMarriottHotels } from '../services/marriottHotels.js';
+import { saveTrip, getTrip, resetAllData } from '../services/database.js';
 
 // Palette of colors for new attendees added dynamically
 const AVATAR_COLORS = ['#E91E63','#9C27B0','#3F51B5','#00BCD4','#FF5722','#795548','#607D8B','#FF9800'];
@@ -24,7 +27,7 @@ export default function Crewfare() {
 
   // If no active session AND not joining via invite link, wipe stale localStorage data so we always start fresh
   if (!savedUser && !isAttendeeLink) {
-    ['crewfare_members', 'crewfare_hotels', 'crewfare_activities', 'crewfare_trips', 'crewfare_itinerary'].forEach(k => localStorage.removeItem(k));
+    ['crewfare_members', 'crewfare_hotels', 'crewfare_activities', 'crewfare_trips', 'crewfare_itinerary', 'crewfare_real_hotels'].forEach(k => localStorage.removeItem(k));
     sessionStorage.removeItem('crewfare_trip');
   }
 
@@ -36,6 +39,11 @@ export default function Crewfare() {
 
   const [activeTab, setActiveTab] = useState('home');
   const [pendingRole, setPendingRole] = useState(isAttendeeLink ? 'attendee' : 'organizer');
+  const [showResetPanel, setShowResetPanel] = useState(false);
+  const [resetState, setResetState] = useState(null); // null | 'confirm' | 'running' | 'done'
+  const [resetResult, setResetResult] = useState(null);
+  const logoClickCount = useRef(0);
+  const logoClickTimer = useRef(null);
   const [itinerary, setItinerary] = useState(() => {
     try {
       const saved = localStorage.getItem('crewfare_itinerary');
@@ -50,7 +58,16 @@ export default function Crewfare() {
 
   // Trip info set by organizer during onboarding
   const savedTrip = (() => { try { return JSON.parse(sessionStorage.getItem('crewfare_trip') || localStorage.getItem('crewfare_trip') || 'null'); } catch { return null; } })();
-  const [tripInfo, setTripInfo] = useState(savedTrip || {
+
+  // If attendee arrived via invite link and we have their tripSlug but no full tripInfo yet,
+  // attempt to load it from localStorage keyed by tripSlug
+  const urlTripSlug = (() => { try { return new URLSearchParams(window.location.search).get('trip') || null; } catch { return null; } })();
+  const tripInfoFromSlug = (() => {
+    if (!urlTripSlug) return null;
+    try { return JSON.parse(localStorage.getItem(`crewfare_trip_${urlTripSlug}`) || 'null'); } catch { return null; }
+  })();
+
+  const [tripInfo, setTripInfo] = useState(savedTrip || tripInfoFromSlug || {
     name: TRIP.name,
     destination: TRIP.destination,
     startDate: TRIP.startDate,
@@ -59,9 +76,31 @@ export default function Crewfare() {
     endISO: TRIP.endISO,
   });
 
-  const { members, addMember, updateMember } = useMembers();
-  const { hotels, updateHotel } = useHotels();
-  const { activities, addActivity, updateActivity } = useActivities();
+  // If attendee has a URL slug but no local trip info, try fetching from DB
+  useEffect(() => {
+    if (!urlTripSlug || (tripInfoFromSlug || savedTrip)) return;
+    getTrip(urlTripSlug).then(data => {
+      if (data && data.destination) {
+        const loaded = { ...data, tripSlug: urlTripSlug };
+        setTripInfo(loaded);
+        localStorage.setItem(`crewfare_trip_${urlTripSlug}`, JSON.stringify(loaded));
+      }
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlTripSlug]);
+
+  // Derive a stable trip ID: URL param → saved tripSlug → default
+  const tripId = urlTripSlug || tripInfo.tripSlug || import.meta.env.VITE_TRIP_ID || 'trip-2026';
+
+  const { members, addMember, updateMember } = useMembers(tripId);
+  const [realHotels, setRealHotels] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crewfare_real_hotels');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const { hotels, updateHotel } = useHotels(realHotels, tripId);
+  const { activities, addActivity, updateActivity } = useActivities(tripId);
 
   const [currentUser, setCurrentUser] = useState(savedUser || '');
 
@@ -124,11 +163,34 @@ export default function Crewfare() {
     }
   };
 
-  const handleBook = (id) => {
-    const activity = activities.find(a => a.id === id);
-    if (activity) {
-      updateActivity(id, { booked: true });
-    }
+  const handleBook = (activity, date, time) => {
+    if (!activity) return;
+    // Mark as booked in activities list
+    updateActivity(activity.id, { booked: true });
+    // Add to itinerary on the selected date
+    const newItem = {
+      id: `act-${activity.id}-${Date.now()}`,
+      title: activity.title,
+      type: 'activity',
+      time: time || '10:00 AM',
+      who: 'All',
+      private: false,
+      note: activity.description || '',
+      emoji: activity.emoji || '✨',
+    };
+    const eventDate = date || '';
+    if (!eventDate) return;
+    setItinerary(prev => {
+      const existing = prev.find(day => day.date === eventDate);
+      if (existing) {
+        return prev.map(day =>
+          day.date === eventDate
+            ? { ...day, items: [...day.items, newItem] }
+            : day
+        );
+      }
+      return [...prev, { date: eventDate, items: [newItem] }];
+    });
   };
 
   // ── Itinerary actions ─────────────────────────────────────────────────────
@@ -172,7 +234,7 @@ export default function Crewfare() {
     onBack={() => setView('landing')}
   />;
 
-  if (view === 'organizer-onboarding') return <OrganizerOnboarding onComplete={async (name, hotelId, form) => {
+  if (view === 'organizer-onboarding') return <OrganizerOnboarding onComplete={async (name, hotelId, form, fetchedHotels, tripSlug) => {
     if (name) {
       setCurrentUser(name);
       sessionStorage.setItem('crewfare_user', name);
@@ -180,7 +242,8 @@ export default function Crewfare() {
       ['crewfare_members','crewfare_hotels','crewfare_activities'].forEach(k => localStorage.removeItem(k));
 
       // Save trip info from organizer's form
-      const hotelName = HOTELS.find(h => h.id === hotelId)?.name || '';
+      const selectedHotel = (fetchedHotels || []).find(h => h.id === hotelId);
+      const hotelName = selectedHotel?.name || '';
       const startISO = form?.startDate || TRIP.startISO;
       const endISO = form?.endDate || TRIP.endISO;
       const formatDate = (iso) => {
@@ -194,28 +257,45 @@ export default function Crewfare() {
         endDate: form?.endDate ? formatDate(endISO) : TRIP.endDate,
         startISO, endISO,
         organizerName: name,
+        tripSlug: tripSlug || 'trip-2026',
       };
       setTripInfo(newTripInfo);
       sessionStorage.setItem('crewfare_trip', JSON.stringify(newTripInfo));
       localStorage.setItem('crewfare_trip', JSON.stringify(newTripInfo));
+      // Also save under slug-specific key so attendees can load the plan via invite link
+      localStorage.setItem(`crewfare_trip_${newTripInfo.tripSlug}`, JSON.stringify(newTripInfo));
+      // Persist trip to DynamoDB so attendees on other devices can load it
+      // Adopt real Marriott hotels fetched during onboarding
+      if (fetchedHotels && fetchedHotels.length > 0) {
+        const hotelsWithHighlight = fetchedHotels.map((h, i) => ({
+          ...h, highlight: i === 0, bookedBy: [],
+        }));
+        localStorage.setItem('crewfare_real_hotels', JSON.stringify(hotelsWithHighlight));
+      }
 
-      // Add organizer as member with correct role
+      // Persist organizer as member
       const orgMember = {
         id: `m-org-${Date.now()}`, name,
         initials: name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
         color: AVATAR_COLORS[0], role: 'organizer', hotel: hotelName, confirmed: true,
       };
-      await addMember(orgMember);
+      try { await addMember(orgMember); } catch {}
 
-      // Book hotel room directly — avoids race condition from calling handleBookRoom after addMember
+      // Persist organizer hotel booking
       if (hotelId) {
-        const hotel = HOTELS.find(h => h.id === hotelId);
-        if (hotel) {
-          await updateHotel(hotelId, { ...hotel, bookedBy: [name] });
+        const hotelObj = selectedHotel || HOTELS.find(h => h.id === hotelId);
+        if (hotelObj) {
+          try { await updateHotel(hotelId, { ...hotelObj, bookedBy: [name] }); } catch {}
         }
       }
+
+      // Hard-redirect to ?trip=<slug>&skip=1 so ALL hooks reinitialise with the new tripId
+      const url = new URL(window.location.href);
+      url.search = `?trip=${newTripInfo.tripSlug}&skip=1`;
+      window.location.replace(url.toString());
+      return;
     }
-    setView('app');
+    setView('app');  // fallback if name was empty
   }} />;
 
   if (view === 'attendee-welcome') return <AttendeeWelcomePage
@@ -258,14 +338,40 @@ export default function Crewfare() {
       <div style={{ position: 'sticky', top: 0, zIndex: 100, background: M.black, boxShadow: '0 2px 12px rgba(0,0,0,0.3)' }}>
         {/* Brand bar */}
         <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px 8px', gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: M.red, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: M.white, fontSize: 15 }}>M</div>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: M.red, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, color: M.white, fontSize: 15, cursor: 'pointer', userSelect: 'none' }}
+            title="Triple-click for admin tools"
+            onClick={() => {
+              logoClickCount.current += 1;
+              clearTimeout(logoClickTimer.current);
+              logoClickTimer.current = setTimeout(() => { logoClickCount.current = 0; }, 600);
+              if (logoClickCount.current >= 3) {
+                logoClickCount.current = 0;
+                setShowResetPanel(v => !v);
+                setResetState(null);
+                setResetResult(null);
+              }
+            }}
+          >M</div>
           <div style={{ flex: 1 }}>
             <div style={{ color: M.white, fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>{tripInfo.name || TRIP.name}</div>
             <div style={{ color: M.gray4, fontSize: 11 }}>📍 {tripInfo.destination || TRIP.destination} · {tripInfo.startDate || TRIP.startDate} – {tripInfo.endDate || TRIP.endDate}</div>
           </div>
-          <div style={{ display: 'flex', gap: 4 }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             {members.slice(0, 4).map(m => <Av key={m.id} name={m.name} color={m.color} size={28} />)}
             {members.length > 4 && <div style={{ width: 28, height: 28, borderRadius: '50%', background: M.gray5, color: M.white, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>+{members.length - 4}</div>}
+            {/* Plan Another Trip */}
+            <button
+              title="Plan another trip"
+              onClick={() => {
+                sessionStorage.removeItem('crewfare_user');
+                sessionStorage.removeItem('crewfare_view');
+                sessionStorage.removeItem('crewfare_trip');
+                window.location.href = window.location.origin + window.location.pathname;
+              }}
+              style={{ marginLeft: 6, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: M.white, fontSize: 11, fontWeight: 700, padding: '4px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            >
+              + New Trip
+            </button>
           </div>
         </div>
 
@@ -302,11 +408,12 @@ export default function Crewfare() {
             onCommentAdd={handleCommentAdd}
           />
         )}
-        {activeTab === 'hotels' && <HotelsTab hotels={hotels} members={members} onBookRoom={handleBookRoom} currentUser={currentUser} />}
+        {activeTab === 'hotels' && <HotelsTab hotels={hotels} members={members} onBookRoom={handleBookRoom} currentUser={currentUser} tripInfo={tripInfo} />}
         {activeTab === 'activities' && (
           <ActivitiesTab
             activities={activities}
             currentUser={currentUser}
+            tripInfo={tripInfo}
             onUpvote={handleUpvote}
             onDownvote={handleDownvote}
             onCommentAdd={handleCommentAdd}
@@ -325,6 +432,123 @@ export default function Crewfare() {
         {activeTab === 'expenses' && <ExpenseTab members={members} currentUser={currentUser} tripInfo={tripInfo} />}
         {activeTab === 'memories' && <MemoriesTab photos={MOCK_PHOTOS} tripInfo={tripInfo} />}
         {activeTab === 'invite' && <InviteTab members={members} tripInfo={tripInfo} />}
+      </div>
+
+      {/* ── Admin Reset Panel (triple-click brand logo to open) ── */}
+      {showResetPanel && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 }}>
+          <div style={{ background: M.white, borderRadius: 16, padding: 28, width: '100%', maxWidth: 460, boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', color: M.white, fontWeight: 900, fontSize: 18 }}>⚙</div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: M.black }}>Admin Reset</div>
+                <div style={{ fontSize: 12, color: M.gray4 }}>Clears all data — DynamoDB tables + localStorage</div>
+              </div>
+            </div>
+
+            {resetState === null && (
+              <>
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 14px', marginBottom: 18 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: '#991b1b', marginBottom: 4 }}>⚠️ This will permanently delete:</div>
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0, fontSize: 13, color: '#7f1d1d', lineHeight: 1.8 }}>
+                    <li>All trips in <strong>CrewfareTrips</strong></li>
+                    <li>All members in <strong>CrewfareMembers</strong></li>
+                    <li>All hotels in <strong>CrewfareHotels</strong></li>
+                    <li>All activities in <strong>CrewfareActivities</strong></li>
+                    <li>All <strong>localStorage</strong> crewfare_* keys</li>
+                  </ul>
+                </div>
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setShowResetPanel(false)} style={{ padding: '9px 18px', borderRadius: 8, border: `1.5px solid ${M.gray3}`, background: M.white, cursor: 'pointer', fontWeight: 600, fontSize: 13, color: M.gray5 }}>Cancel</button>
+                  <button onClick={() => setResetState('confirm')} style={{ padding: '9px 18px', borderRadius: 8, border: 'none', background: '#dc2626', color: M.white, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Reset All Data…</button>
+                </div>
+              </>
+            )}
+
+            {resetState === 'confirm' && (
+              <>
+                <div style={{ fontSize: 14, color: M.gray5, marginBottom: 20, lineHeight: 1.6 }}>
+                  Are you absolutely sure? Type <strong>RESET</strong> to confirm.
+                </div>
+                <ConfirmReset
+                  onConfirm={async () => {
+                    setResetState('running');
+                    try {
+                      const result = await resetAllData();
+                      setResetResult(result);
+                    } catch (e) {
+                      setResetResult({ error: e.message });
+                    }
+                    setResetState('done');
+                  }}
+                  onCancel={() => setResetState(null)}
+                />
+              </>
+            )}
+
+            {resetState === 'running' && (
+              <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                <div style={{ width: 40, height: 40, border: '4px solid #fecaca', borderTop: '4px solid #dc2626', borderRadius: '50%', animation: 'spin .8s linear infinite', margin: '0 auto 16px' }} />
+                <div style={{ fontWeight: 600, color: M.gray5 }}>Deleting all records…</div>
+              </div>
+            )}
+
+            {resetState === 'done' && (
+              <>
+                {resetResult?.error ? (
+                  <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 14px', marginBottom: 16, fontSize: 13, color: '#991b1b' }}>
+                    Error: {resetResult.error}
+                  </div>
+                ) : (
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px', marginBottom: 16 }}>
+                    <div style={{ fontWeight: 700, color: '#166534', marginBottom: 8 }}>✓ Reset complete</div>
+                    {(resetResult?.tables || []).map(t => (
+                      <div key={t.table} style={{ fontSize: 12, color: '#166534', lineHeight: 1.8 }}>
+                        {t.status === 'ok' ? '✓' : '✗'} {t.table}: {t.deleted} rows deleted
+                        {t.status !== 'ok' && <span style={{ color: '#dc2626' }}> ({t.status})</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    setShowResetPanel(false);
+                    window.location.href = window.location.origin + window.location.pathname;
+                  }}
+                  style={{ width: '100%', padding: '10px', borderRadius: 8, border: 'none', background: M.black, color: M.white, cursor: 'pointer', fontWeight: 700, fontSize: 14 }}
+                >
+                  Restart App
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Confirm Reset (type RESET to confirm) ────────────────────────────────
+function ConfirmReset({ onConfirm, onCancel }) {
+  const [val, setVal] = useState('');
+  return (
+    <div>
+      <input
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        placeholder='Type RESET'
+        autoFocus
+        style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${val === 'RESET' ? '#dc2626' : M.gray3}`, borderRadius: 8, fontFamily: 'monospace', fontSize: 15, outline: 'none', marginBottom: 14, boxSizing: 'border-box' }}
+      />
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <button onClick={onCancel} style={{ padding: '9px 18px', borderRadius: 8, border: `1.5px solid ${M.gray3}`, background: M.white, cursor: 'pointer', fontWeight: 600, fontSize: 13, color: M.gray5 }}>Cancel</button>
+        <button
+          disabled={val !== 'RESET'}
+          onClick={onConfirm}
+          style={{ padding: '9px 18px', borderRadius: 8, border: 'none', background: val === 'RESET' ? '#dc2626' : M.gray3, color: M.white, cursor: val === 'RESET' ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 13 }}
+        >
+          Confirm Reset
+        </button>
       </div>
     </div>
   );
@@ -551,12 +775,60 @@ function ChooseRolePage({ onOrganizer, onAttendee, onBack }) {
 }
 
 // ─── Hotels Tab ───────────────────────────────────────────────────────────────
-function HotelsTab({ hotels, members, onBookRoom, currentUser }) {
+function HotelsTab({ hotels: propHotels, members, onBookRoom, currentUser, tripInfo = {} }) {
   const [selectedHotel, setSelectedHotel] = useState(null);
   const [bookingStep, setBookingStep] = useState(0);
   const [bookerName, setBookerName] = useState('');
   const [confNum, setConfNum] = useState('');
-  const bookedRooms = hotels.reduce((acc, h) => acc + h.bookedBy.length, 0);
+  const [liveHotels, setLiveHotels] = useState(propHotels);
+  const [hotelsLoading, setHotelsLoading] = useState(false);
+
+  const destination = tripInfo.destination || TRIP.destination;
+
+  // Fetch real Marriott hotels whenever destination changes
+  useEffect(() => {
+    if (!destination) return;
+    let cancelled = false;
+    setHotelsLoading(true);
+    geocodeCity(destination).then(async coords => {
+      if (cancelled) return;
+      if (coords) {
+        const fetched = await fetchMarriottHotels(coords.lat, coords.lng);
+        if (!cancelled && fetched && fetched.length > 0) {
+          setLiveHotels(fetched);
+          // Persist for Hotels tab persistence
+          try { localStorage.setItem('crewfare_real_hotels', JSON.stringify(fetched)); } catch {}
+        }
+      }
+      if (!cancelled) setHotelsLoading(false);
+    }).catch(() => { if (!cancelled) setHotelsLoading(false); });
+    return () => { cancelled = true; };
+  }, [destination]);
+
+  // Also reflect any externally-updated propHotels (e.g. from organizer onboarding)
+  useEffect(() => {
+    if (propHotels && propHotels.length > 0 && propHotels !== HOTELS) {
+      setLiveHotels(propHotels);
+    }
+  }, [propHotels]);
+
+  const hotels = liveHotels;
+  const bookedRooms = hotels.reduce((acc, h) => acc + (h.bookedBy || []).length, 0);
+
+  const discountRooms = tripInfo.discountRooms || TRIP.discountRooms;
+  const discountPct   = tripInfo.discountPct   || TRIP.discountPct;
+  const startDate     = tripInfo.startDate     || TRIP.startDate;
+  const endDate       = tripInfo.endDate       || TRIP.endDate;
+
+  // Calculate nights between check-in and check-out
+  const nights = (() => {
+    try {
+      const s = new Date(tripInfo.startISO || TRIP.startISO);
+      const e = new Date(tripInfo.endISO   || TRIP.endISO);
+      const n = Math.round((e - s) / 86400000);
+      return n > 0 ? n : 6;
+    } catch { return 6; }
+  })();
 
   const openBooking = (h) => {
     setSelectedHotel(h);
@@ -574,44 +846,60 @@ function HotelsTab({ hotels, members, onBookRoom, currentUser }) {
     <div style={{ paddingBottom: 40 }}>
       <div style={{ background: M.black, padding: '20px 20px 16px' }}>
         <h2 style={{ fontFamily: serif, color: M.white, fontSize: 22, marginBottom: 4 }}>Hotels</h2>
+        <p style={{ color: M.red, fontSize: 13, marginBottom: 2 }}>📍 {destination}</p>
         <p style={{ color: M.gray4, fontSize: 13 }}>
-          {bookedRooms} of {TRIP.discountRooms} rooms booked · {Math.max(0, TRIP.discountRooms - bookedRooms)} more for {TRIP.discountPct}% group discount
+          {bookedRooms} of {discountRooms} rooms booked · {Math.max(0, discountRooms - bookedRooms)} more for {discountPct}% group discount
         </p>
         <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 20, height: 6, marginTop: 10, overflow: 'hidden' }}>
-          <div style={{ width: `${Math.min((bookedRooms / TRIP.discountRooms) * 100, 100)}%`, height: '100%', background: `linear-gradient(90deg, ${M.red}, ${M.gold})`, borderRadius: 20, transition: 'width 0.6s ease' }} />
+          <div style={{ width: `${Math.min((bookedRooms / discountRooms) * 100, 100)}%`, height: '100%', background: `linear-gradient(90deg, ${M.red}, ${M.gold})`, borderRadius: 20, transition: 'width 0.6s ease' }} />
         </div>
-        {bookedRooms >= TRIP.discountRooms && (
-          <div style={{ marginTop: 8, fontSize: 12, color: M.gold, fontWeight: 700 }}>🎉 Group discount unlocked! {TRIP.discountPct}% off all rooms.</div>
+        {bookedRooms >= discountRooms && (
+          <div style={{ marginTop: 8, fontSize: 12, color: M.gold, fontWeight: 700 }}>🎉 Group discount unlocked! {discountPct}% off all rooms.</div>
         )}
       </div>
       <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {hotels.map(h => (
+        {hotelsLoading && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <p style={{ color: M.gray4, fontSize: 13, textAlign: 'center' }}>🔍 Finding Marriott hotels near {destination}…</p>
+            {[1, 2, 3].map(i => (
+              <div key={i} style={{ borderRadius: 12, overflow: 'hidden', background: M.white, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}>
+                <div style={{ height: 140, background: 'linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite' }} />
+                <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ height: 18, width: '60%', borderRadius: 6, background: 'linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite' }} />
+                  <div style={{ height: 13, width: '40%', borderRadius: 6, background: 'linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!hotelsLoading && hotels.map(h => (
           <Card key={h.id} highlight={h.highlight} style={{ padding: 0, overflow: 'hidden' }}>
             {h.highlight && <div style={{ background: `linear-gradient(90deg, ${M.gold}, #e8c55a)`, padding: '5px 14px', fontSize: 11, fontWeight: 700, color: '#5a3e00' }}>★ Organizer's Hotel</div>}
-            <img src={h.image} alt={h.name} style={{ width: '100%', height: 160, objectFit: 'cover' }} />
+            <img src={h.image} alt={h.name} style={{ width: '100%', height: 160, objectFit: 'cover' }}
+              onError={e => { e.target.src = 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=600&q=80'; }} />
             <div style={{ padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 16, color: M.black, marginBottom: 4 }}>{h.name}</div>
                   <div style={{ fontSize: 12, color: M.gray4, marginBottom: 6 }}>📍 {h.distance}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {h.amenities.slice(0, 4).map(a => <Tag key={a} label={a} color={M.teal} />)}
+                    {(h.amenities || []).slice(0, 4).map(a => <Tag key={a} label={a} color={M.teal} />)}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 22, fontWeight: 800, color: M.red }}>${h.rate}</div>
                   <div style={{ fontSize: 11, color: M.gray4, textDecoration: 'line-through' }}>${h.originalRate}</div>
-                  <div style={{ fontSize: 11, color: M.gold }}>⭐ {h.stars} · {h.bonvoyPts.toLocaleString()} pts/night</div>
+                  <div style={{ fontSize: 11, color: M.gold }}>⭐ {h.stars} · {(h.bonvoyPts || 0).toLocaleString()} pts/night</div>
                 </div>
               </div>
               {/* Live bookedBy list */}
-              {h.bookedBy.length > 0 && (
+              {(h.bookedBy || []).length > 0 && (
                 <div style={{ margin: '12px 0 4px' }}>
                   <div style={{ fontSize: 12, color: M.gray5, marginBottom: 6 }}>
                     {h.bookedBy.length} room{h.bookedBy.length !== 1 ? 's' : ''} booked:
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    {h.bookedBy.map(name => {
+                    {(h.bookedBy || []).map(name => {
                       const m = members.find(m => m.name === name);
                       return (
                         <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -630,8 +918,6 @@ function HotelsTab({ hotels, members, onBookRoom, currentUser }) {
           </Card>
         ))}
       </div>
-
-      {/* Booking Modal */}
       {selectedHotel && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
           <div style={{ background: M.white, borderRadius: 16, padding: 28, maxWidth: 440, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
@@ -639,7 +925,6 @@ function HotelsTab({ hotels, members, onBookRoom, currentUser }) {
               <>
                 <h3 style={{ fontFamily: serif, fontSize: 20, marginBottom: 6 }}>Confirm Booking</h3>
                 <p style={{ color: M.gray5, fontSize: 14, marginBottom: 16 }}>{selectedHotel.name}</p>
-                {/* Name input */}
                 <div style={{ marginBottom: 16 }}>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: M.gray5, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Your Name <span style={{ color: M.red }}>*</span>
@@ -655,11 +940,11 @@ function HotelsTab({ hotels, members, onBookRoom, currentUser }) {
                 </div>
                 <div style={{ background: M.gray1, borderRadius: 10, padding: 14, marginBottom: 20 }}>
                   {[
-                    ['Check-in',        TRIP.startDate],
-                    ['Check-out',       TRIP.endDate],
-                    ['Rate',            `$${selectedHotel.rate}/night`],
-                    ['Total (6 nights)',`$${selectedHotel.rate * 6}`],
-                    ['Bonvoy Points',   `${(selectedHotel.bonvoyPts * 6).toLocaleString()} pts`],
+                    ['Check-in',  startDate],
+                    ['Check-out', endDate],
+                    ['Rate',      `$${selectedHotel.rate}/night`],
+                    [`Total (${nights} nights)`, `$${selectedHotel.rate * nights}`],
+                    ['Bonvoy Points', `${((selectedHotel.bonvoyPts || 0) * nights).toLocaleString()} pts`],
                   ].map(([k, v]) => (
                     <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: `1px solid ${M.gray2}` }}>
                       <span style={{ color: M.gray5 }}>{k}</span>
@@ -897,7 +1182,14 @@ function InviteTab({ members, tripInfo = {} }) {
   const [copied, setCopied] = useState(false);
   const [emailInput, setEmailInput] = useState('');
   const [sentEmails, setSentEmails] = useState([]);
-  const shareLink = `${window.location.origin}?trip=orlando-2026&ref=organizer`;
+
+  // Build a URL-safe trip slug from destination + year, e.g. "nashville-2026"
+  const tripSlug = tripInfo.tripSlug || (() => {
+    const dest = (tripInfo.destination || TRIP.destination).split(',')[0].trim().toLowerCase().replace(/\s+/g, '-');
+    const year  = tripInfo.startISO ? tripInfo.startISO.slice(0, 4) : new Date().getFullYear();
+    return `${dest}-${year}`;
+  })();
+  const shareLink = `${window.location.origin}?trip=${tripSlug}&ref=organizer`;
 
   const copy = () => {
     navigator.clipboard.writeText(shareLink).then(() => {
