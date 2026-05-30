@@ -494,10 +494,11 @@ export default function Crewfare() {
                     try {
                       const result = await resetAllData();
                       setResetResult(result);
+                      setResetState('done');
                     } catch (e) {
                       setResetResult({ error: e.message });
+                      setResetState('done');
                     }
-                    setResetState('done');
                   }}
                   onCancel={() => setResetState(null)}
                 />
@@ -531,7 +532,8 @@ export default function Crewfare() {
                 <button
                   onClick={() => {
                     setShowResetPanel(false);
-                    window.location.href = window.location.origin + window.location.pathname;
+                    sessionStorage.clear();
+                    window.location.replace(window.location.origin + window.location.pathname);
                   }}
                   style={{ width: '100%', padding: '10px', borderRadius: 8, border: 'none', background: M.black, color: M.white, cursor: 'pointer', fontWeight: 700, fontSize: 14 }}
                 >

@@ -32,22 +32,33 @@ export const useMembers = (tripId = null) => {
   });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const loadMembers = async () => {
-      try {
-        const data = await getMembers(TRIP_ID);
-        if (data.length > 0) {
-          setMembers(data);
-          localStorage.setItem(`crewfare_members_${TRIP_ID}`, JSON.stringify(data));
-        }
-      } catch (error) {
-        console.warn('Failed to load members, using cached:', error);
-      } finally {
-        setLoading(false);
+  const syncFromDB = useCallback(async (silent = false) => {
+    try {
+      const data = await getMembers(TRIP_ID);
+      if (data.length > 0) {
+        setMembers(data);
+        localStorage.setItem(`crewfare_members_${TRIP_ID}`, JSON.stringify(data));
+      } else if (!silent) {
+        setMembers([]);
+        localStorage.removeItem(`crewfare_members_${TRIP_ID}`);
       }
-    };
-    loadMembers();
+    } catch (error) {
+      if (!silent) console.warn('Failed to load members, using cached:', error);
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, [TRIP_ID]);
+
+  // Initial load
+  useEffect(() => {
+    syncFromDB(false);
+  }, [syncFromDB]);
+
+  // Poll every 15 seconds so crew list stays live for all users
+  useEffect(() => {
+    const interval = setInterval(() => syncFromDB(true), 15000);
+    return () => clearInterval(interval);
+  }, [syncFromDB]);
 
   const addMember = useCallback(async (memberData) => {
     try {
@@ -161,28 +172,41 @@ export const useActivities = (tripId = null) => {
   });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const loadActivities = async () => {
-      try {
-        const data = await getActivities(TRIP_ID);
-        if (data.length > 0) {
-          setActivities(data);
-          localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(data));
-        }
-        // If DB returns nothing, leave the list as-is (already loaded from localStorage above)
-      } catch (error) {
-        console.warn('Failed to load activities from DB:', error);
-      } finally {
-        setLoading(false);
+  const syncFromDB = useCallback(async (silent = false) => {
+    try {
+      const data = await getActivities(TRIP_ID);
+      if (data.length > 0) {
+        setActivities(data);
+        localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(data));
+      } else if (!silent) {
+        // DB returned empty (after a reset) — clear local state too
+        setActivities([]);
+        localStorage.removeItem(`crewfare_activities_${TRIP_ID}`);
       }
-    };
-    loadActivities();
+    } catch (error) {
+      if (!silent) console.warn('Failed to load activities from DB:', error);
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, [TRIP_ID]);
+
+  // Initial load
+  useEffect(() => {
+    syncFromDB(false);
+  }, [syncFromDB]);
+
+  // Poll every 15 seconds so all users see activities added by others
+  useEffect(() => {
+    const interval = setInterval(() => syncFromDB(true), 15000);
+    return () => clearInterval(interval);
+  }, [syncFromDB]);
 
   const addActivity = useCallback(async (activityData) => {
     try {
       const saved = await saveActivity(TRIP_ID, activityData);
       setActivities(prev => {
+        // avoid duplicates if polling already picked it up
+        if (prev.find(a => a.id === saved.id || a.activityId === saved.activityId)) return prev;
         const next = [...prev, saved];
         localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(next));
         return next;
@@ -203,14 +227,14 @@ export const useActivities = (tripId = null) => {
       const updated = { id: activityId, ...updates };
       await saveActivity(TRIP_ID, updated);
       setActivities(prev => {
-        const next = prev.map(a => a.id === activityId ? { ...a, ...updates } : a);
+        const next = prev.map(a => (a.id === activityId || a.activityId === activityId) ? { ...a, ...updates } : a);
         localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(next));
         return next;
       });
     } catch (error) {
       console.error('Failed to update activity:', error);
       setActivities(prev => {
-        const next = prev.map(a => a.id === activityId ? { ...a, ...updates } : a);
+        const next = prev.map(a => (a.id === activityId || a.activityId === activityId) ? { ...a, ...updates } : a);
         localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(next));
         return next;
       });

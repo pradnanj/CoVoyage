@@ -241,9 +241,9 @@ export const resetAllData = async () => {
   // 3. For each DynamoDB table, scan all items and delete them
   const TABLES = [
     { name: 'CrewfareTrips',      pk: 'tripId',      sk: null },
-    { name: 'CrewfareMembers',    pk: 'memberId',    sk: null },
-    { name: 'CrewfareHotels',     pk: 'hotelId',     sk: null },
-    { name: 'CrewfareActivities', pk: 'activityId',  sk: null },
+    { name: 'CrewfareMembers',    pk: 'memberId',    sk: 'tripId' },
+    { name: 'CrewfareHotels',     pk: 'hotelId',     sk: 'tripId' },
+    { name: 'CrewfareActivities', pk: 'activityId',  sk: 'tripId' },
   ];
 
   let totalDeleted = 0;
@@ -254,16 +254,18 @@ export const resetAllData = async () => {
     let lastKey = undefined;
     try {
       do {
+        // Project both hash key and sort key so DeleteItem has the full composite key
+        const projFields = table.sk ? `${table.pk}, ${table.sk}` : table.pk;
         const scanRes = await docClient.send(new ScanCommand({
           TableName: table.name,
-          ProjectionExpression: table.pk,
+          ProjectionExpression: projFields,
           ExclusiveStartKey: lastKey,
           Limit: 100,
         }));
         const items = scanRes.Items || [];
         for (const item of items) {
           const key = { [table.pk]: item[table.pk] };
-          if (table.sk && item[table.sk]) key[table.sk] = item[table.sk];
+          if (table.sk && item[table.sk] !== undefined) key[table.sk] = item[table.sk];
           await docClient.send(new DeleteCommand({ TableName: table.name, Key: key }));
           deleted++;
         }
