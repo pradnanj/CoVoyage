@@ -1,14 +1,12 @@
-# Crewfare — CoVoyage
+# CoVoyage — Group Trip Planner
 
-A full-featured group trip planning microsite built with React + Vite, powered by Marriott Bonvoy branding and an AI concierge backed by Claude (Anthropic).
+A full-featured group trip planning microsite built with **React + Vite**, powered by Marriott Bonvoy branding, real-time location and hotel data, and an AI concierge backed by Claude (Anthropic).
 
 ---
 
 ## Overview
 
-Crewfare lets groups of friends and families plan trips together — from booking hotels and coordinating flights to brainstorming activities and building a shared itinerary. It supports two distinct user personas: **Trip Organizer** and **Trip Attendee**.
-
-**Demo destination:** Orlando, FL · Jul 12–18, 2026
+CoVoyage lets groups of friends and families plan trips together — from booking Marriott hotels and coordinating flights to brainstorming activities and building a shared itinerary. It supports two distinct user personas: **Trip Organizer** and **Trip Attendee**, with full multi-plan isolation so multiple independent trip plans can coexist without data bleeding between them.
 
 ---
 
@@ -17,14 +15,15 @@ Crewfare lets groups of friends and families plan trips together — from bookin
 ### Two User Personas
 
 #### Trip Organizer
-- Select destination, trip name, and travel dates
-- Browse and book the first hotel room
+- Select a **real-time US city destination** (autocomplete powered by OpenDataSoft + Census Bureau Geocoder)
+- Set trip name and travel dates
+- Browse and book from **live Marriott hotels near the selected destination** (OpenStreetMap Overpass API)
 - Enter personal flight itinerary
-- Set up group info (name, email, estimated rooms, welcome note)
-- Generate and share a unique invite link with attendees
+- Set group info (name, email, estimated rooms, welcome note)
+- Generate and share a **unique per-trip invite link** (e.g. `?trip=miami-2026&ref=organizer`)
 
-#### Trip Attendee (TurboTax-style onboarding)
-- Opens the organizer's shared link
+#### Trip Attendee
+- Opens the organizer's shared link → sees the exact trip destination, dates, and hotel options
 - Signs in via Marriott Bonvoy, Google, or Apple
 - Enters names and ages of all guests in their room
 - Sees where other crew members have booked; books their own room
@@ -34,86 +33,73 @@ Crewfare lets groups of friends and families plan trips together — from bookin
 ---
 
 ### Home Page
-- **Hero banner** with trip name, destination, dates, and group stats
-- **Room booking progress bar** — tracks toward 10-room milestone for 12% group discount
+- **Hero banner** with destination-aware background image, trip name, dates, and group stats
+- **Room booking progress bar** — tracks toward the group discount milestone
 - **Live hotel breakdown** — shows who booked where with avatars
 - **Crew status list** — confirmed/pending attendees with hotel assignments
-- **Activity Brainstorm Board** — top 5 activities sorted by net votes with upvote/downvote/comment
+- **Activity Brainstorm Board** — top activities sorted by net votes with upvote/downvote/comment
 
 ### Hotels Tab
+- **Real-time Marriott hotels** near the selected destination fetched on every tab visit
 - Hotel cards with images, amenities, rates, and Bonvoy points
 - Organizer's hotel highlighted with a gold badge
 - Live "Booked by" list with attendee avatars
 - Booking modal with name capture — updates room count and crew list instantly everywhere
+- Shimmer loading skeleton while hotels are being fetched
 
 ### Activities Tab
-- **AI Concierge search** powered by Claude — hotel activities (pool, spa, restaurant) shown first with a gold "HOTEL HIGHLIGHT" badge
-- Filter by category: Theme Park, Outdoor, Food & Beverage, Wellness, Educational, Pool/Resort
+- **AI Concierge search** powered by Claude — type a query and get 5–8 structured activity cards specific to your destination, each with an **Add** button to add directly to the board
+- No manual form — all activities come from the AI or the brainstorm board
+- Filter by category (Outdoor, Culture, Food, Entertainment, Sports, Wellness, Adventure, Shopping, Nightlife)
 - Sort by popularity (net votes) or price
-- Each activity card shows: price per person, description, available dates & times, age restrictions, deadline to book, cancellation policy, voter avatars
-- **Upvote / Downvote** — list re-sorts in real time on every vote
+- Each activity card: price per person, description, duration, voter avatars, comments
+- **Upvote / Downvote** — list re-sorts in real time
 - Comment thread per activity
-- Book activity button
-- **Food preferences panel** — dietary restrictions (Gluten-Free, Vegan, Halal, etc.), meal times, allergy notes
-- Submit your own activity idea form
+- **Book Now** → opens a date + time picker within the planned trip's date range → confirms booking and adds to itinerary automatically
+- **Food preferences panel** — dietary restrictions, meal times, allergy notes
 
 ### Itinerary Page
-- Full 7-day combined group itinerary (Jul 12–18)
+- Full combined group itinerary across all trip days
+- Events auto-populate when activities are booked from the Activities tab
 - Color-coded event types: hotel, activity, food, transport, personal
 - Timeline view with connectors
 - Filter events by individual crew member
-- **Add Event modal** — title, time, day, event type, attendees, private flag (e.g. personal spa appointment)
+- **Add Event modal** — title, time, day, event type, attendees, private flag
 
 ### Budget Tab
 - Total estimated, committed, and remaining budget
 - Per-person cost breakdown
-- Line-item expense list with committed/estimated status
-- Marriott Bonvoy savings callout (points + group discount)
+- Line-item expense list
+- Marriott Bonvoy savings callout
 
 ### Memories Tab
 - Photo upload (drag-and-drop or file picker)
-- Tag-based filtering (Arrival, Culture, Adventure, Food, Family, etc.)
+- Tag-based filtering
 - Grid and scrapbook (polaroid) view
 - AI-generated photo captions powered by Claude
-- Trip postcard generator — creates a printable postcard with story, highlights, and insider tips
+- Trip postcard generator
 
 ### Invite Tab
-- Copy-to-clipboard shareable invite link
+- Copy-to-clipboard shareable invite link (dynamically reflects the organizer's chosen destination and year)
 - Live crew roster (updates when new members join)
 - Share via Email, Text, WhatsApp
 
 ---
 
-## Dynamic State
+## Multi-Plan Isolation
 
-All state is lifted to the top-level `Crewfare` component and passed down as props:
+Each trip plan is fully isolated:
 
-| Action | Updates |
+| Resource | Isolation key |
 |---|---|
-| Book a room (Hotels tab or Attendee onboarding) | Hotel's "Booked by" list, room count progress bar, crew list, header avatars |
-| Complete Attendee onboarding | New member added to crew list, Invite roster, header |
-| Upvote / Downvote an activity | Activity list re-sorts by net votes instantly |
-| Add event to itinerary | Appears in the shared group timeline |
+| DynamoDB members | `tripId` (GSI `tripId-index`) |
+| DynamoDB hotels | `tripId` (GSI `tripId-index`) |
+| DynamoDB activities | `tripId` (GSI `tripId-index`) |
+| localStorage members | `crewfare_members_<tripSlug>` |
+| localStorage activities | `crewfare_activities_<tripSlug>` |
+| Trip info | `crewfare_trip_<tripSlug>` |
 
----
-
-## Demo Data — Orlando, FL
-
-**Hotels:**
-- Orlando World Center Marriott *(Organizer's hotel)* — $289/night
-- JW Marriott Orlando Grande Lakes — $359/night
-- Courtyard Orlando Lake Buena Vista — $169/night
-- Renaissance Orlando at SeaWorld — $229/night
-
-**Activities:**
-- Magic Kingdom — Disney World
-- Universal Studios / Wizarding World of Harry Potter
-- Kennedy Space Center & NASA Shuttle Tour
-- Marriott World Center Pool & Cabana *(Hotel Highlight)*
-- Marriott Spa Day *(Hotel Highlight)*
-- Cocoa Beach Day Trip
-- Mikado Hotel Restaurant (teppanyaki) *(Hotel Highlight)*
-- EPCOT Food & Wine Experience
+When an organizer completes onboarding the app **hard-redirects** to `?trip=<slug>&skip=1` so all React hooks reinitialise with the correct `tripId`. Attendees always use the `?trip=` URL param as their primary tripId source.
 
 ---
 
@@ -123,10 +109,11 @@ All state is lifted to the top-level `Crewfare` component and passed down as pro
 |---|---|
 | Framework | React 19 |
 | Build tool | Vite 8 |
-| Routing | React Router DOM |
 | Styling | Inline styles with Marriott Bonvoy design tokens |
-| AI | Anthropic Claude (`claude-sonnet-4-20250514`) |
-| Data | Local state (no backend) |
+| AI | Anthropic Claude (`claude-sonnet-4-5`) |
+| Location search | OpenDataSoft US Cities API + Census Bureau Geocoder |
+| Hotel data | OpenStreetMap Overpass API (real Marriott properties) |
+| Database | AWS DynamoDB (optional) + localStorage (always-on fallback) |
 
 ---
 
@@ -138,12 +125,28 @@ npm install
 
 # Start development server
 npm run dev
-
-# Build for production
-npm run build
 ```
 
 The app runs at **http://localhost:5173** by default.
+
+---
+
+## Environment Variables
+
+Create `.env.local` in the project root:
+
+```env
+# AWS DynamoDB (optional — app works with localStorage if omitted)
+VITE_AWS_REGION=us-east-2
+VITE_AWS_ACCESS_KEY_ID=YOUR_KEY_HERE
+VITE_AWS_SECRET_ACCESS_KEY=YOUR_SECRET_HERE
+VITE_TRIP_ID=trip-2026
+
+# Anthropic Claude AI (required for AI activity search and photo captions)
+VITE_ANTHROPIC_API_KEY=sk-ant-api03-YOUR_KEY_HERE
+```
+
+> **Never commit `.env.local` to source control.**
 
 ---
 
@@ -151,8 +154,9 @@ The app runs at **http://localhost:5173** by default.
 
 | Parameter | Effect |
 |---|---|
-| `?trip=orlando-2026&ref=organizer` | Opens the Attendee onboarding flow (simulates clicking a shared link) |
-| `?skip=1` | Skips onboarding entirely and opens the trip dashboard directly |
+| `?trip=miami-2026&ref=organizer` | Opens the Attendee welcome + onboarding flow for the Miami 2026 plan |
+| `?trip=miami-2026&skip=1` | Opens the trip dashboard directly (post-onboarding redirect) |
+| `?skip=1` | Skips onboarding and opens the app with whatever trip is in session |
 
 ---
 
@@ -161,34 +165,53 @@ The app runs at **http://localhost:5173** by default.
 ```
 src/
 ├── main.jsx                          # React entry point
-├── App.jsx                           # Root component
-├── constants.js                      # All demo data & design tokens
+├── constants.js                      # Design tokens, fallback data
 ├── index.css                         # Global styles & animations
+├── services/
+│   ├── database.js                   # DynamoDB + localStorage hybrid API
+│   ├── locations.js                  # US city autocomplete & geocoding
+│   └── marriottHotels.js             # Real-time Marriott hotel fetcher (Overpass)
+├── hooks/
+│   └── useDatabase.js                # useMembers / useHotels / useActivities hooks
 └── components/
     ├── Crewfare.jsx                  # App shell, routing, shared state
-    ├── OrganizerOnboarding.jsx       # 6-step organizer setup flow
-    ├── AttendeeOnboarding.jsx        # 6-step attendee onboarding flow
+    ├── OrganizerOnboarding.jsx       # Multi-step organizer setup flow
+    ├── AttendeeOnboarding.jsx        # Multi-step attendee onboarding flow
     ├── shared.jsx                    # Shared UI: Av, Tag, Card, Buttons, AISearch
     └── tabs/
         ├── HomeTab.jsx               # Home page with brainstorm board
-        ├── ActivitiesTab.jsx         # Activity feed with AI search
+        ├── HotelsTab.jsx             # (defined in Crewfare.jsx)
+        ├── ActivitiesTab.jsx         # Activity feed with AI search & book-now flow
         ├── ItineraryTab.jsx          # Group itinerary timeline
+        ├── ExpenseTab.jsx            # Budget tracker
         └── MemoriesTab.jsx           # Photo memories & postcard generator
+scripts/
+└── reset-db.sh                       # CLI script to wipe all DynamoDB tables
 ```
 
 ---
 
 ## AI Concierge
 
-The AI search in the Activities tab and Home page is powered by Anthropic's Claude API. It is configured to:
-- Prioritize activities **at or offered by the Marriott World Center** (pool, spa, restaurants, shuttle, kids club)
-- Provide specific pricing and Bonvoy point tips
-- Respond in the voice of a knowledgeable hotel concierge
+The AI search in the Activities tab is powered by Anthropic's `claude-sonnet-4-5` model. When `onAddActivity` is wired (Activities tab), it requests a **structured JSON array** of destination-specific activities. Each result renders as a card with an **+ Add** button. When used elsewhere (general questions), it returns conversational prose.
 
-> **Note:** The Claude API key must be configured for AI features to work. The app includes offline fallback responses so it is fully functional without an API key.
+> The Claude API key must be set as `VITE_ANTHROPIC_API_KEY` in `.env.local`. Without it, a setup prompt is shown instead of AI results.
+
+---
+
+## Resetting All Data
+
+### In-app (triple-click the "M" logo in the header)
+Opens an admin panel. Requires typing `RESET` to confirm. Deletes all rows from all DynamoDB tables and clears all `crewfare_*` localStorage keys.
+
+### CLI
+```bash
+bash scripts/reset-db.sh
+# prompts: Type RESET to continue
+```
 
 ---
 
 ## Group Discount
 
-When the group reaches **10 rooms booked**, a **12% discount** is automatically unlocked for all room rates. The progress bar on the Home page and Hotels tab tracks this in real time.
+When the group reaches the organizer's target room count, a percentage discount is automatically unlocked. The progress bar on the Home page and Hotels tab tracks this in real time. Both values are set by the organizer during onboarding.

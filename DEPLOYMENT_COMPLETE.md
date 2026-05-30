@@ -1,191 +1,149 @@
-# 🚀 CrewFare - Full Stack Deployment Complete!
+# CoVoyage — Architecture & Deployment
 
-## ✅ What Was Completed
+## Current Architecture
 
-### 1. **Database Infrastructure** ✓
-- Created hybrid database system:
-  - **localStorage** (works immediately, zero AWS setup needed)
-  - **DynamoDB** (optional upgrade for cloud persistence)
-- Built 4 DynamoDB-ready tables:
-  - `CrewfareTrips` - Event metadata
-  - `CrewfareMembers` - Attendees/crew
-  - `CrewfareHotels` - Hotel bookings
-  - `CrewfareActivities` - Suggested activities
+```
+CoVoyage App (React + Vite)
+          │
+          ▼
+┌─────────────────────────────────────────────┐
+│  Crewfare.jsx  (app shell + shared state)   │
+│  ├─ tripId derived from ?trip= URL param    │
+│  ├─ organizer hard-redirect after onboard   │
+│  └─ Admin Reset Panel (triple-click logo)   │
+└──────────────┬──────────────────────────────┘
+               │
+       ┌───────┼───────────┐
+       ▼       ▼           ▼
+  useMembers  useHotels  useActivities
+  (tripId)    (tripId)    (tripId)
+       │           │           │
+       ▼           ▼           ▼
+  src/services/database.js
+  (hybrid — DynamoDB primary, localStorage fallback)
+       │                   │
+       ▼                   ▼
+  AWS DynamoDB          localStorage
+  (cloud, multi-device)  (always-on, single-device)
+```
 
-### 2. **React Integration** ✓
-- Created custom hooks (`src/hooks/useDatabase.js`):
-  - `useMembers()` - Manage crew
-  - `useHotels()` - Manage hotel bookings
-  - `useActivities()` - Manage activities
-- Updated Crewfare.jsx to use database hooks
-- All data persists across page refreshes (localStorage)
+## External API Integrations
 
-### 3. **API Layer** ✓
-- Built `src/services/database.js`:
-  - Automatic fallback: localStorage → DynamoDB
-  - Works with or without AWS credentials
-  - Error handling with local persistence
-
-### 4. **Deployment** ✓
-- ✅ **Live on AWS Amplify**: https://main.xxxxx.amplifyapp.com
-- ✅ **Auto-deploys on git push**
-- ✅ **Data persists in browser (localStorage)**
-
----
-
-## 📱 How It Works Right Now
-
-1. **User books a hotel** → Data saved to localStorage
-2. **Page refreshes** → Data is still there ✓
-3. **Share with friends** → They see the same data (on same device)
-4. **Data syncs** → All changes are immediate
+| Integration | Purpose | File |
+|---|---|---|
+| OpenDataSoft US Cities | Destination autocomplete | `src/services/locations.js` |
+| Census Bureau Geocoder | City → lat/lng | `src/services/locations.js` |
+| OpenStreetMap Overpass | Real Marriott hotels near destination | `src/services/marriottHotels.js` |
+| Anthropic Claude (`claude-sonnet-4-5`) | AI activity suggestions, photo captions, concierge | `src/components/shared.jsx`, `src/components/tabs/MemoriesTab.jsx` |
+| AWS DynamoDB | Persistent multi-device trip data | `src/services/database.js` |
 
 ---
 
-## 🔧 How to Upgrade to AWS DynamoDB (Optional)
+## Running Locally
 
-### When you're ready to add cloud persistence:
-
-**Step 1: Create AWS Credentials**
 ```bash
-# Go to: https://console.aws.amazon.com/iam/home#/users
-# Create user "crewfare-dev" with:
-# - AmazonDynamoDBFullAccess policy
-# - Programmatic access
-# Copy: Access Key ID & Secret Access Key
+npm install
+npm run dev
+# → http://localhost:5173
 ```
 
-**Step 2: Set Environment Variables**
+### Required environment variables (`.env.local`)
+
+```env
+# DynamoDB — optional (app works without it)
+VITE_AWS_REGION=us-east-2
+VITE_AWS_ACCESS_KEY_ID=YOUR_KEY
+VITE_AWS_SECRET_ACCESS_KEY=YOUR_SECRET
+VITE_TRIP_ID=trip-2026
+
+# Claude AI — required for AI search features
+VITE_ANTHROPIC_API_KEY=sk-ant-api03-YOUR_KEY
+```
+
+---
+
+## Multi-Plan Isolation
+
+Every trip plan is completely isolated using a `tripSlug` (e.g. `miami-2026`) derived from the destination and start year:
+
+- Organizer finishes onboarding → app saves trip to DynamoDB and redirects to `?trip=miami-2026&skip=1`
+- Invite link always contains `?trip=miami-2026&ref=organizer`
+- All hooks (`useMembers`, `useHotels`, `useActivities`) receive `tripId` as a parameter
+- All localStorage keys are namespaced: `crewfare_members_miami-2026`, etc.
+- DynamoDB queries always use the `tripId-index` GSI
+
+A member who receives the `orlando-2026` invite link will never see any data from the `miami-2026` plan, and vice versa.
+
+---
+
+## New Trip Flow (Organizer)
+
+Click **+ New Trip** in the app header → clears session data → returns to landing page for a fresh onboarding flow. Each completed onboarding produces a unique `tripSlug` and isolated data partition.
+
+---
+
+## Data Reset
+
+### In-app
+Triple-click the **M** logo → type `RESET` → confirm.
+
+### CLI
 ```bash
-# In .env.local (don't commit!):
-REACT_APP_AWS_REGION=us-east-1
-REACT_APP_AWS_ACCESS_KEY_ID=YOUR_KEY
-REACT_APP_AWS_SECRET_ACCESS_KEY=YOUR_SECRET
-REACT_APP_TRIP_ID=trip-orlando-2026
-```
-
-**Step 3: Create DynamoDB Tables**
-```bash
-# Option A: Using Amplify CLI (recommended)
-amplify configure
-amplify init
-amplify add storage
-amplify push
-
-# Option B: Manual (AWS Console)
-# https://console.aws.amazon.com/dynamodb
-# Create 4 tables as shown in DYNAMODB_SETUP.md
-```
-
-**Step 4: Deploy**
-```bash
-npm run build
-git add . && git commit -m "Enable DynamoDB"
-git push origin main  # Auto-deploys!
+bash scripts/reset-db.sh
 ```
 
 ---
 
-## 📊 Current Architecture
-
-```
-CrewFare App (React + Vite)
-    ↓
-useMembers(), useHotels(), useActivities() [Custom Hooks]
-    ↓
-src/services/database.js [Hybrid DB Service]
-    ↓
-┌─────────────────────────────────────┐
-│  localStorage (Active Now) ✓        │
-│  - Works immediately                │
-│  - No AWS setup needed              │
-│  - Persists across refreshes        │
-└─────────────────────────────────────┘
-    ↓ (when credentials added)
-┌─────────────────────────────────────┐
-│  AWS DynamoDB (Optional)            │
-│  - Cloud persistence                │
-│  - Multi-device sync                │
-│  - Scalable backend                 │
-└─────────────────────────────────────┘
-```
-
----
-
-## 💰 Cost Estimate
-
-| Service | Current | With DynamoDB |
-|---------|---------|---------------|
-| Amplify Hosting | $0 (free tier) | $0 (free tier) |
-| DynamoDB | N/A | $0-5/month (on-demand) |
-| Storage | localStorage (5MB) | S3 if photos added |
-| **Total** | **$0/month** | **$0-5/month** |
-
----
-
-## 🎯 Hackathon Checklist
-
-- [x] App deployed to Amplify (live now!)
-- [x] Data persistence works (localStorage)
-- [x] Room booking saves data
-- [x] Attendees persist across refreshes
-- [x] DynamoDB ready (when needed)
-- [ ] Test on mobile devices
-- [ ] Add real-time features (optional)
-- [ ] Optimize for demo (bundle size warning)
-
----
-
-## 📁 New Files Created
+## Files Added / Changed
 
 ```
 src/
 ├── services/
-│   └── database.js           # Hybrid DB service
+│   ├── database.js          ← resetAllData(), saveTrip(), getTrip() added
+│   ├── locations.js         ← NEW: US city autocomplete + geocoding
+│   └── marriottHotels.js    ← NEW: real-time Marriott hotel fetcher
 ├── hooks/
-│   └── useDatabase.js        # React custom hooks
+│   └── useDatabase.js       ← all hooks now accept tripId param; namespaced localStorage
 └── components/
-    └── Crewfare.jsx         # Updated to use hooks
+    ├── Crewfare.jsx          ← multi-plan isolation, booking modal, admin reset, + New Trip button
+    ├── OrganizerOnboarding.jsx ← DestinationInput, dynamic hotel fetch, tripSlug on complete
+    ├── AttendeeOnboarding.jsx  ← fetches real hotels for attendee destination display
+    ├── shared.jsx             ← AISearch returns JSON activity cards; Claude auth headers fixed
+    └── tabs/
+        ├── HomeTab.jsx        ← null-safe guards for AI-generated activity props
+        └── ActivitiesTab.jsx  ← BookActivityModal, AI-only activity entry, null-safe guards
 
-.env.local                    # AWS credentials (don't commit!)
-DYNAMODB_SETUP.md             # Detailed AWS setup guide
-amplify-setup.md              # Amplify CLI guide
+scripts/
+└── reset-db.sh               ← NEW: AWS CLI script to wipe all DynamoDB tables
+
+.env.local                    ← VITE_ prefix (not REACT_APP_)
 ```
 
 ---
 
-## 🆘 Troubleshooting
+## Deployment to AWS Amplify
 
-### "Data isn't persisting"
-- Check browser localStorage: DevTools → Application → localStorage
-- Should see keys like `crewfare_members`, `crewfare_hotels`
+1. Push to GitHub
+2. Connect repo in the Amplify Console → auto-build on every push
+3. Add the environment variables from `.env.local` in **Amplify → App settings → Environment variables**
+4. Ensure the IAM user has `AmazonDynamoDBFullAccess` (or the narrower policy in `DYNAMODB_SETUP.md`)
 
-### "AWS credentials not working"
-- Verify .env.local is in project root
-- Restart dev server after adding env vars
-- Check AWS IAM user has `AmazonDynamoDBFullAccess`
-
-### "Want to switch back to mock data"
-- Just remove AWS credentials from .env.local
-- App automatically falls back to localStorage/CONSTANTS
-
----
-
-## 📞 Next Steps
-
-1. **Test the live app** → Visit Amplify URL and book a room
-2. **Share with team** → Test on different devices
-3. **When ready for AWS** → Follow DynamoDB upgrade steps
-4. **For production** → Add AWS Cognito for user authentication
+```bash
+npm run build   # verify locally before pushing
+git add .
+git commit -m "deploy"
+git push origin main
+```
 
 ---
 
-## 🎉 You're Live!
+## Troubleshooting
 
-Your CrewFare app is now:
-- ✅ Deployed globally on AWS Amplify
-- ✅ Persisting data locally
-- ✅ Ready to scale with DynamoDB
-- ✅ Auto-deploying on git push
-
-**Happy hacking! 🚀**
+| Issue | Solution |
+|---|---|
+| `vite: command not found` | Run `npm install` |
+| AI search returns nothing | Check `VITE_ANTHROPIC_API_KEY` in `.env.local`; restart dev server |
+| Hotels not loading | Destination geocoding may fail for very small cities; try a major US city |
+| DynamoDB SSL error | Add `--no-verify-ssl` to AWS CLI commands |
+| Attendee sees wrong trip | Invite URL must include `?trip=<slug>&ref=organizer` |
+| All members share one plan | Ensure hooks receive `tripId` and tables have `tripId-index` GSI |

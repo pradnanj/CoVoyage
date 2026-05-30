@@ -1,173 +1,224 @@
-# CrewFare DynamoDB + Lambda Integration Guide
+# CoVoyage — DynamoDB Setup Guide
 
-## 📋 Complete Setup Steps
+## Table Schema
 
-### Step 1: Install Dependencies
+| Table | Primary Key | GSI |
+|---|---|---|
+| `CrewfareTrips` | `tripId` (String) | — |
+| `CrewfareMembers` | `memberId` (String) | `tripId-index` (hash: `tripId`) |
+| `CrewfareHotels` | `hotelId` (String) | `tripId-index` (hash: `tripId`) |
+| `CrewfareActivities` | `activityId` (String) | `tripId-index` (hash: `tripId`) |
+
+> **Important:** `CrewfareMembers`, `CrewfareHotels`, and `CrewfareActivities` all require a Global Secondary Index named **`tripId-index`** with `tripId` as the hash key. Without the GSI the app cannot query members/hotels/activities by trip.
+
+---
+
+## Step 1 — Install AWS SDK
+
 ```bash
 npm install @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
 ```
 
-### Step 2: Configure AWS Amplify Backend
+---
 
-**Option A: Using Amplify CLI (Recommended)**
-
-```bash
-# 1. Configure your AWS credentials
-amplify configure
-
-# 2. Initialize Amplify in your project
-amplify init
-# Select: dev environment, us-east-1 region
-
-# 3. Add database (DynamoDB)
-amplify add storage
-# Select "Content" template
-
-# 4. Deploy to AWS
-amplify push
-```
-
-**Option B: Manual AWS Console Setup**
-
-1. Go to https://console.aws.amazon.com/dynamodb
-2. Create these tables (On-demand billing):
-
-| Table Name | Primary Key | Sort Key | GSI |
-|---|---|---|---|
-| CrewfareTrips | tripId (String) | - | - |
-| CrewfareMembers | memberId (String) | tripId (String) | tripId-index |
-| CrewfareHotels | hotelId (String) | tripId (String) | tripId-index |
-| CrewfareActivities | activityId (String) | tripId (String) | tripId-index |
-
-### Step 3: Get AWS Credentials
-
-1. Go to https://console.aws.amazon.com/iam/home#/users
-2. Create new user "amplify-dev" with "Programmatic access"
-3. Attach policy: "AmazonDynamoDBFullAccess"
-4. Download CSV with Access Key ID and Secret Access Key
-
-### Step 4: Configure Environment Variables
-
-1. Open `.env.local` in your project
-2. Fill in your AWS credentials:
-```
-REACT_APP_AWS_REGION=us-east-1
-REACT_APP_AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY_HERE
-REACT_APP_AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY_HERE
-REACT_APP_TRIP_ID=trip-orlando-2026
-```
-
-3. Add `.env.local` to `.gitignore` (don't commit credentials!)
-
-### Step 5: Update Your React Components
-
-**Example: Using Database Hooks in Crewfare.jsx**
-
-```jsx
-import { useMembers, useHotels, useActivities } from './hooks/useDatabase';
-
-export default function Crewfare() {
-  // Replace local state with database-synced hooks
-  const { members, addMember, updateMember } = useMembers();
-  const { hotels, updateHotel } = useHotels();
-  const { activities, updateActivity } = useActivities();
-
-  // When booking a room, it now saves to DynamoDB
-  const handleBookRoom = async (hotelId, userName) => {
-    // ... existing logic ...
-    await updateHotel(hotelId, { bookedBy: [...hotel.bookedBy, userName] });
-  };
-
-  // ... rest of component
-}
-```
-
-### Step 6: Deploy to Production
+## Step 2 — Create DynamoDB Tables (AWS CLI)
 
 ```bash
-# Rebuild your app
-npm run build
+REGION=us-east-2
 
-# Push to GitHub (auto-deploys to Amplify)
-git add .
-git commit -m "Add DynamoDB integration"
-git push origin main
+# CrewfareTrips
+aws dynamodb create-table \
+  --table-name CrewfareTrips \
+  --attribute-definitions AttributeName=tripId,AttributeType=S \
+  --key-schema AttributeName=tripId,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region $REGION --no-verify-ssl
+
+# CrewfareMembers + tripId-index
+aws dynamodb create-table \
+  --table-name CrewfareMembers \
+  --attribute-definitions \
+    AttributeName=memberId,AttributeType=S \
+    AttributeName=tripId,AttributeType=S \
+  --key-schema AttributeName=memberId,KeyType=HASH \
+  --global-secondary-indexes '[{
+    "IndexName":"tripId-index",
+    "KeySchema":[{"AttributeName":"tripId","KeyType":"HASH"}],
+    "Projection":{"ProjectionType":"ALL"}
+  }]' \
+  --billing-mode PAY_PER_REQUEST \
+  --region $REGION --no-verify-ssl
+
+# CrewfareHotels + tripId-index
+aws dynamodb create-table \
+  --table-name CrewfareHotels \
+  --attribute-definitions \
+    AttributeName=hotelId,AttributeType=S \
+    AttributeName=tripId,AttributeType=S \
+  --key-schema AttributeName=hotelId,KeyType=HASH \
+  --global-secondary-indexes '[{
+    "IndexName":"tripId-index",
+    "KeySchema":[{"AttributeName":"tripId","KeyType":"HASH"}],
+    "Projection":{"ProjectionType":"ALL"}
+  }]' \
+  --billing-mode PAY_PER_REQUEST \
+  --region $REGION --no-verify-ssl
+
+# CrewfareActivities + tripId-index
+aws dynamodb create-table \
+  --table-name CrewfareActivities \
+  --attribute-definitions \
+    AttributeName=activityId,AttributeType=S \
+    AttributeName=tripId,AttributeType=S \
+  --key-schema AttributeName=activityId,KeyType=HASH \
+  --global-secondary-indexes '[{
+    "IndexName":"tripId-index",
+    "KeySchema":[{"AttributeName":"tripId","KeyType":"HASH"}],
+    "Projection":{"ProjectionType":"ALL"}
+  }]' \
+  --billing-mode PAY_PER_REQUEST \
+  --region $REGION --no-verify-ssl
 ```
 
 ---
 
-## 🔒 Security Notes
+## Step 3 — Configure Environment Variables
 
-⚠️ **Never commit AWS credentials to GitHub!**
+Create `.env.local` in the project root:
 
-For production, use AWS Cognito:
-1. Enable Cognito User Pool in Amplify
-2. Add authentication to your app
-3. Users authenticate instead of using access keys
+```env
+VITE_AWS_REGION=us-east-2
+VITE_AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY_ID
+VITE_AWS_SECRET_ACCESS_KEY=YOUR_SECRET_ACCESS_KEY
+VITE_TRIP_ID=trip-2026
+VITE_ANTHROPIC_API_KEY=sk-ant-api03-YOUR_ANTHROPIC_KEY
+```
+
+> Use `VITE_` prefix — not `REACT_APP_`. Vite ignores `REACT_APP_` variables.
+
+Restart the dev server after editing `.env.local`:
+
+```bash
+npm run dev
+```
 
 ---
 
-## 📚 Example: Full Component Integration
+## Step 4 — Verify Tables Exist
 
-```jsx
-import { useMembers, useHotels } from './hooks/useDatabase';
+```bash
+aws dynamodb list-tables --region us-east-2 --no-verify-ssl
+```
 
-export default function HotelsTab() {
-  const { hotels, updateHotel } = useHotels();
-  const { addMember } = useMembers();
-
-  const handleBookRoom = async (hotelId, guestName) => {
-    const hotel = hotels.find(h => h.id === hotelId);
-    const updatedBooking = [...hotel.bookedBy, guestName];
-    
-    // Save to database
-    await updateHotel(hotelId, { bookedBy: updatedBooking });
-    
-    // Add guest to crew
-    await addMember({
-      id: `m-${Date.now()}`,
-      name: guestName,
-      hotel: hotel.name,
-      confirmed: true
-    });
-  };
-
-  return (
-    <div>
-      {hotels.map(hotel => (
-        <button onClick={() => handleBookRoom(hotel.id, 'New Guest')}>
-          Book {hotel.name}
-        </button>
-      ))}
-    </div>
-  );
+Expected output:
+```json
+{
+  "TableNames": [
+    "CrewfareActivities",
+    "CrewfareHotels",
+    "CrewfareMembers",
+    "CrewfareTrips"
+  ]
 }
 ```
 
 ---
 
-## ✅ Testing Data Persistence
+## How the App Uses DynamoDB
 
-1. Book a room in your app
-2. Refresh the page
-3. Check that booking is still there ✓
-4. Go to AWS Console → DynamoDB → Tables and verify data was saved
+All reads/writes go through `src/services/database.js` which auto-detects whether credentials are present:
+
+- **With credentials** → writes to DynamoDB (with localStorage fallback on error)
+- **Without credentials** → uses localStorage only
+
+The hooks in `src/hooks/useDatabase.js` (`useMembers`, `useHotels`, `useActivities`) each accept a `tripId` parameter. Every query uses the `tripId-index` GSI so data is always scoped to one trip plan.
+
+### Data flow per plan
+
+```
+Organizer completes onboarding
+  → tripSlug = "miami-2026"
+  → saveTrip({ tripId: "miami-2026", ... })           → CrewfareTrips
+  → saveMember("miami-2026", organizerMember)          → CrewfareMembers (tripId=miami-2026)
+  → Hard redirect: ?trip=miami-2026&skip=1
+
+Attendee opens invite link (?trip=miami-2026&ref=organizer)
+  → getTrip("miami-2026")                             ← CrewfareTrips
+  → getMembers("miami-2026")                          ← CrewfareMembers WHERE tripId=miami-2026
+  → saveMember("miami-2026", attendeeMember)           → CrewfareMembers (tripId=miami-2026)
+```
 
 ---
 
-## 🆘 Troubleshooting
+## Resetting All Data
+
+### CLI script
+```bash
+bash scripts/reset-db.sh
+# prompts: Type RESET to continue
+```
+
+### In-app
+Triple-click the red **M** logo → Admin Reset panel → type `RESET` → Confirm.
+
+### Manual AWS CLI (per table)
+```bash
+# Example: clear all members
+aws dynamodb scan \
+  --table-name CrewfareMembers \
+  --projection-expression "memberId" \
+  --query "Items[*].memberId.S" \
+  --output text \
+  --region us-east-2 --no-verify-ssl \
+| tr '\t' '\n' \
+| xargs -I{} aws dynamodb delete-item \
+    --table-name CrewfareMembers \
+    --key '{"memberId":{"S":"{}"}}' \
+    --region us-east-2 --no-verify-ssl
+```
+
+---
+
+## Troubleshooting
 
 | Issue | Solution |
-|-------|----------|
-| "Cannot find module" | Run `npm install` again |
-| "Invalid credentials" | Check `.env.local` file, ensure keys are correct |
-| "Table doesn't exist" | Run `amplify push` or manually create in AWS Console |
-| "CORS error" | Add Amplify REST API instead of direct DynamoDB access |
+|---|---|
+| `ResourceNotFoundException` | Tables not created — run the `create-table` commands above |
+| DynamoDB error, falling back to localStorage | Check credentials in `.env.local`; ensure `VITE_` prefix |
+| SSL validation failed | Add `--no-verify-ssl` to AWS CLI commands |
+| Data missing after refresh | Check browser DevTools → Application → localStorage for `crewfare_members_<tripId>` |
+| Attendee sees wrong trip | Ensure invite URL includes `?trip=<slug>&ref=organizer` |
+| Two plans sharing members | Confirm `tripId-index` GSI exists on `CrewfareMembers`, `CrewfareHotels`, `CrewfareActivities` |
 
 ---
 
-## 📞 Need Help?
+## IAM Permissions Required
 
-- AWS Docs: https://docs.aws.amazon.com/dynamodb/
-- Amplify Docs: https://docs.amplify.aws/
-- DynamoDB Console: https://console.aws.amazon.com/dynamodb
+The IAM user or role needs at minimum:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "dynamodb:PutItem",
+    "dynamodb:GetItem",
+    "dynamodb:Query",
+    "dynamodb:Scan",
+    "dynamodb:DeleteItem"
+  ],
+  "Resource": [
+    "arn:aws:dynamodb:us-east-2:*:table/Crewfare*",
+    "arn:aws:dynamodb:us-east-2:*:table/Crewfare*/index/*"
+  ]
+}
+```
+
+---
+
+## Cost Estimate
+
+| Service | Estimated cost |
+|---|---|
+| DynamoDB (on-demand) | $0–5/month for typical group-trip workloads |
+| Anthropic Claude API | ~$0.003–0.015 per AI activity search |
+| **Total** | **< $10/month** |
