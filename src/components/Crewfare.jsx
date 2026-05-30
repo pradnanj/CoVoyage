@@ -79,11 +79,26 @@ export default function Crewfare() {
   // If attendee has a URL slug but no local trip info, try fetching from DB
   useEffect(() => {
     if (!urlTripSlug || (tripInfoFromSlug || savedTrip)) return;
-    getTrip(urlTripSlug).then(data => {
+    getTrip(urlTripSlug).then(async data => {
       if (data && data.destination) {
         const loaded = { ...data, tripSlug: urlTripSlug };
         setTripInfo(loaded);
         localStorage.setItem(`crewfare_trip_${urlTripSlug}`, JSON.stringify(loaded));
+        // Also fetch real hotels for this destination so the attendee sees the same hotels
+        if (data.destination && !localStorage.getItem('crewfare_real_hotels')) {
+          try {
+            const { geocodeCity } = await import('../services/locations.js');
+            const { fetchMarriottHotels } = await import('../services/marriottHotels.js');
+            const coords = await geocodeCity(data.destination);
+            if (coords) {
+              const fetched = await fetchMarriottHotels(coords.lat, coords.lng);
+              if (fetched && fetched.length > 0) {
+                localStorage.setItem('crewfare_real_hotels', JSON.stringify(fetched));
+                setRealHotels(fetched);
+              }
+            }
+          } catch {}
+        }
       }
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -272,6 +287,9 @@ export default function Crewfare() {
         }));
         localStorage.setItem('crewfare_real_hotels', JSON.stringify(hotelsWithHighlight));
       }
+
+      // Save trip to DynamoDB so attendees on other devices can load it via invite link
+      try { await saveTrip({ ...newTripInfo, tripId: newTripInfo.tripSlug, id: newTripInfo.tripSlug }); } catch (e) { console.warn('saveTrip failed:', e); }
 
       // Persist organizer as member
       const orgMember = {

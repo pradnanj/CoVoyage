@@ -5,7 +5,7 @@ import {
   saveHotel, getHotels,
   saveActivity, getActivities
 } from '../services/database';
-import { MEMBERS, HOTELS, ACTIVITIES } from '../constants';
+import { MEMBERS, HOTELS } from '../constants';
 
 // Derive trip ID from URL param (?trip=…) or env, falling back to default
 function resolveTripId() {
@@ -156,7 +156,8 @@ export const useActivities = (tripId = null) => {
       const parsed = saved ? JSON.parse(saved) : null;
       if (parsed && parsed.length > 0) return parsed;
     } catch {}
-    return ACTIVITIES;
+    // For a new attendee with no local data yet, start empty — DB load will fill it
+    return [];
   });
   const [loading, setLoading] = useState(true);
 
@@ -168,9 +169,9 @@ export const useActivities = (tripId = null) => {
           setActivities(data);
           localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(data));
         }
+        // If DB returns nothing, leave the list as-is (already loaded from localStorage above)
       } catch (error) {
-        console.warn('Failed to load activities, using defaults:', error);
-        setActivities(ACTIVITIES);
+        console.warn('Failed to load activities from DB:', error);
       } finally {
         setLoading(false);
       }

@@ -33,25 +33,26 @@ if (USE_DYNAMODB) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // LOCALSTORAGE IMPLEMENTATION (fallback & immediate)
+// Keys are namespaced by both type and tripId so multiple plans never collide.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const storageKey = (type) => `crewfare_${type}`;
+const storageKey = (type, tripId) => tripId ? `crewfare_${type}_${tripId}` : `crewfare_${type}`;
 
-const localStorage_save = (type, id, data) => {
-  const key = storageKey(type);
+const localStorage_save = (type, id, data, tripId) => {
+  const key = storageKey(type, tripId);
   const store = JSON.parse(window.localStorage.getItem(key) || '{}');
   store[id] = { ...data, updatedAt: new Date().toISOString() };
   window.localStorage.setItem(key, JSON.stringify(store));
 };
 
-const localStorage_get = (type, id) => {
-  const key = storageKey(type);
+const localStorage_get = (type, id, tripId) => {
+  const key = storageKey(type, tripId);
   const store = JSON.parse(window.localStorage.getItem(key) || '{}');
   return store[id] || null;
 };
 
-const localStorage_getAll = (type) => {
-  const key = storageKey(type);
+const localStorage_getAll = (type, tripId) => {
+  const key = storageKey(type, tripId);
   const store = JSON.parse(window.localStorage.getItem(key) || '{}');
   return Object.values(store);
 };
@@ -63,7 +64,7 @@ const localStorage_getAll = (type) => {
 // ───── TRIP OPERATIONS ─────────────────────────────────────────
 export const saveTrip = async (tripData) => {
   const trip = {
-    tripId: tripData.id || `trip-${Date.now()}`,
+    tripId: tripData.tripSlug || tripData.id || `trip-${Date.now()}`,
     ...tripData,
     createdAt: new Date().toISOString(),
   };
@@ -73,25 +74,36 @@ export const saveTrip = async (tripData) => {
       await docClient.send(new PutCommand({ TableName: "CrewfareTrips", Item: trip }));
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      localStorage_save('trips', trip.tripId, trip);
+      localStorage_save('trips', trip.tripId, trip, trip.tripId);
     }
   } else {
-    localStorage_save('trips', trip.tripId, trip);
+    localStorage_save('trips', trip.tripId, trip, trip.tripId);
   }
+  // Always keep a quick-access copy keyed by tripSlug for cross-device attendee load
+  window.localStorage.setItem(`crewfare_trip_${trip.tripId}`, JSON.stringify(trip));
   return trip;
 };
 
 export const getTrip = async (tripId) => {
+  // Check the quick-access key first (set by saveTrip above)
+  try {
+    const quick = window.localStorage.getItem(`crewfare_trip_${tripId}`);
+    if (quick) {
+      const parsed = JSON.parse(quick);
+      if (parsed && parsed.destination) return parsed;
+    }
+  } catch {}
+
   if (USE_DYNAMODB && docClient) {
     try {
       const response = await docClient.send(new GetCommand({ TableName: "CrewfareTrips", Key: { tripId } }));
       return response.Item;
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      return localStorage_get('trips', tripId);
+      return localStorage_get('trips', tripId, tripId);
     }
   }
-  return localStorage_get('trips', tripId);
+  return localStorage_get('trips', tripId, tripId);
 };
 
 // ───── MEMBERS OPERATIONS ──────────────────────────────────────
@@ -108,10 +120,10 @@ export const saveMember = async (tripId, memberData) => {
       await docClient.send(new PutCommand({ TableName: "CrewfareMembers", Item: member }));
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      localStorage_save('members', member.memberId, member);
+      localStorage_save('members', member.memberId, member, tripId);
     }
   } else {
-    localStorage_save('members', member.memberId, member);
+    localStorage_save('members', member.memberId, member, tripId);
   }
   return member;
 };
@@ -128,10 +140,10 @@ export const getMembers = async (tripId) => {
       return response.Items || [];
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      return localStorage_getAll('members').filter(m => m.tripId === tripId);
+      return localStorage_getAll('members', tripId);
     }
   }
-  return localStorage_getAll('members').filter(m => m.tripId === tripId);
+  return localStorage_getAll('members', tripId);
 };
 
 // ───── HOTELS OPERATIONS ───────────────────────────────────────
@@ -148,10 +160,10 @@ export const saveHotel = async (tripId, hotelData) => {
       await docClient.send(new PutCommand({ TableName: "CrewfareHotels", Item: hotel }));
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      localStorage_save('hotels', hotel.hotelId, hotel);
+      localStorage_save('hotels', hotel.hotelId, hotel, tripId);
     }
   } else {
-    localStorage_save('hotels', hotel.hotelId, hotel);
+    localStorage_save('hotels', hotel.hotelId, hotel, tripId);
   }
   return hotel;
 };
@@ -168,10 +180,10 @@ export const getHotels = async (tripId) => {
       return response.Items || [];
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      return localStorage_getAll('hotels').filter(h => h.tripId === tripId);
+      return localStorage_getAll('hotels', tripId);
     }
   }
-  return localStorage_getAll('hotels').filter(h => h.tripId === tripId);
+  return localStorage_getAll('hotels', tripId);
 };
 
 // ───── ACTIVITIES OPERATIONS ───────────────────────────────────
@@ -188,10 +200,10 @@ export const saveActivity = async (tripId, activityData) => {
       await docClient.send(new PutCommand({ TableName: "CrewfareActivities", Item: activity }));
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      localStorage_save('activities', activity.activityId, activity);
+      localStorage_save('activities', activity.activityId, activity, tripId);
     }
   } else {
-    localStorage_save('activities', activity.activityId, activity);
+    localStorage_save('activities', activity.activityId, activity, tripId);
   }
   return activity;
 };
@@ -208,10 +220,10 @@ export const getActivities = async (tripId) => {
       return response.Items || [];
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      return localStorage_getAll('activities').filter(a => a.tripId === tripId);
+      return localStorage_getAll('activities', tripId);
     }
   }
-  return localStorage_getAll('activities').filter(a => a.tripId === tripId);
+  return localStorage_getAll('activities', tripId);
 };
 
 // ───── RESET ALL DATA ──────────────────────────────────────────
