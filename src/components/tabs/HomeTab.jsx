@@ -161,6 +161,7 @@ export default function HomeTab({ activities, hotels, members, tripInfo, onUpvot
 function ActivityCard({ act, members, onUpvote, onDownvote, onCommentAdd, commentInputs, setCommentInputs }) {
   const [showComments, setShowComments] = useState(false);
   const netVotes = (act.upvotes || 0) - (act.downvotes || 0);
+  const actId = act.id || act.activityId;
 
   return (
     <Card highlight={act.hotelPriority} style={{ padding: 0, overflow: 'hidden' }}>
@@ -173,9 +174,9 @@ function ActivityCard({ act, members, onUpvote, onDownvote, onCommentAdd, commen
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
           {/* Vote column */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, minWidth: 40 }}>
-            <button onClick={() => onUpvote(act.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, lineHeight: 1, color: act.upvotes > 0 ? M.red : M.gray3 }}>▲</button>
+            <button onClick={() => onUpvote(actId)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, lineHeight: 1, color: (act.upvotes || 0) > 0 ? M.red : M.gray3 }}>▲</button>
             <span style={{ fontWeight: 700, fontSize: 16, color: netVotes > 0 ? M.red : M.gray4, fontFamily: sans }}>{netVotes}</span>
-            <button onClick={() => onDownvote(act.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, lineHeight: 1, color: M.gray3 }}>▼</button>
+            <button onClick={() => onDownvote(actId)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, lineHeight: 1, color: M.gray3 }}>▼</button>
           </div>
           {/* Content */}
           <div style={{ flex: 1 }}>
@@ -225,22 +226,22 @@ function ActivityCard({ act, members, onUpvote, onDownvote, onCommentAdd, commen
               ))}
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                 <input
-                  value={commentInputs[act.id] || ''}
-                  onChange={e => setCommentInputs(p => ({ ...p, [act.id]: e.target.value }))}
+                  value={commentInputs[actId] || ''}
+                  onChange={e => setCommentInputs(p => ({ ...p, [actId]: e.target.value }))}
                   placeholder="Add a comment..."
                   style={{ flex: 1, padding: '8px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 20, fontFamily: sans, fontSize: 13, outline: 'none' }}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && commentInputs[act.id]?.trim()) {
-                      onCommentAdd(act.id, commentInputs[act.id]);
-                      setCommentInputs(p => ({ ...p, [act.id]: '' }));
+                    if (e.key === 'Enter' && commentInputs[actId]?.trim()) {
+                      onCommentAdd(actId, commentInputs[actId]);
+                      setCommentInputs(p => ({ ...p, [actId]: '' }));
                     }
                   }}
                 />
                 <button
                   onClick={() => {
-                    if (commentInputs[act.id]?.trim()) {
-                      onCommentAdd(act.id, commentInputs[act.id]);
-                      setCommentInputs(p => ({ ...p, [act.id]: '' }));
+                    if (commentInputs[actId]?.trim()) {
+                      onCommentAdd(actId, commentInputs[actId]);
+                      setCommentInputs(p => ({ ...p, [actId]: '' }));
                     }
                   }}
                   style={{ background: M.red, color: M.white, border: 'none', borderRadius: 20, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}

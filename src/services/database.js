@@ -188,11 +188,13 @@ export const getHotels = async (tripId) => {
 
 // ───── ACTIVITIES OPERATIONS ───────────────────────────────────
 export const saveActivity = async (tripId, activityData) => {
+  const actId = activityData.id || activityData.activityId || `activity-${Date.now()}`;
   const activity = {
-    activityId: activityData.id || `activity-${Date.now()}`,
+    activityId: actId,
+    id: actId,           // keep id in sync so the app can always find it by a.id
     tripId,
     ...activityData,
-    createdAt: new Date().toISOString(),
+    createdAt: activityData.createdAt || new Date().toISOString(),
   };
 
   if (USE_DYNAMODB && docClient) {
@@ -209,6 +211,17 @@ export const saveActivity = async (tripId, activityData) => {
 };
 
 export const getActivities = async (tripId) => {
+  const normalise = (items) => items.map(a => ({
+    ...a,
+    // Ensure id is always present regardless of which key DynamoDB returned
+    id: a.id || a.activityId,
+    voters:   Array.isArray(a.voters)   ? a.voters   : [],
+    comments: Array.isArray(a.comments) ? a.comments : [],
+    upvotes:   typeof a.upvotes   === 'number' ? a.upvotes   : 0,
+    downvotes: typeof a.downvotes === 'number' ? a.downvotes : 0,
+    bookedBy:  Array.isArray(a.bookedBy) ? a.bookedBy : [],
+  }));
+
   if (USE_DYNAMODB && docClient) {
     try {
       const response = await docClient.send(new QueryCommand({
@@ -217,13 +230,13 @@ export const getActivities = async (tripId) => {
         KeyConditionExpression: "tripId = :tripId",
         ExpressionAttributeValues: { ":tripId": tripId }
       }));
-      return response.Items || [];
+      return normalise(response.Items || []);
     } catch (error) {
       console.error("DynamoDB error, falling back to localStorage:", error.name);
-      return localStorage_getAll('activities', tripId);
+      return normalise(localStorage_getAll('activities', tripId));
     }
   }
-  return localStorage_getAll('activities', tripId);
+  return normalise(localStorage_getAll('activities', tripId));
 };
 
 // ───── RESET ALL DATA ──────────────────────────────────────────

@@ -66,7 +66,9 @@ export default function AttendeeOnboarding({ onComplete, tripInfo: propTripInfo,
       if (cancelled) return;
       const fetched = await fetchMarriottHotels(
         coords ? coords.lat : 28.5383,
-        coords ? coords.lng : -81.3792
+        coords ? coords.lng : -81.3792,
+        30,
+        dest
       );
       // Merge DynamoDB booking counts from propHotels if available
       const merged = fetched.map(rh => {

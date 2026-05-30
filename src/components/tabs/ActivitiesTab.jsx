@@ -147,16 +147,17 @@ export default function ActivitiesTab({ activities, currentUser, tripInfo = {}, 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {filtered.map(act => (
             <ActivityFeedCard
-              key={act.id}
+              key={act.id || act.activityId}
               act={act}
+              currentUser={currentUser}
               onUpvote={onUpvote}
               onDownvote={onDownvote}
               onCommentAdd={onCommentAdd}
               onBook={() => setBookingActivity(act)}
               commentInputs={commentInputs}
               setCommentInputs={setCommentInputs}
-              expanded={expandedId === act.id}
-              onToggleExpand={() => setExpandedId(id => id === act.id ? null : act.id)}
+              expanded={expandedId === (act.id || act.activityId)}
+              onToggleExpand={() => setExpandedId(id => id === (act.id || act.activityId) ? null : (act.id || act.activityId))}
             />
           ))}
           {filtered.length === 0 && (
@@ -254,8 +255,11 @@ function BookActivityModal({ activity, tripDays, currentUser, onConfirm, onCance
   );
 }
 
-function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, commentInputs, setCommentInputs, expanded, onToggleExpand }) {
+function ActivityFeedCard({ act, currentUser, onUpvote, onDownvote, onCommentAdd, onBook, commentInputs, setCommentInputs, expanded, onToggleExpand }) {
   const netVotes = (act.upvotes || 0) - (act.downvotes || 0);
+  const bookedBy = Array.isArray(act.bookedBy) ? act.bookedBy : [];
+  const bookedByMe = currentUser && bookedBy.includes(currentUser);
+  const hasVoted = Array.isArray(act.voters) && currentUser && act.voters.includes(currentUser);
 
   return (
     <Card highlight={act.hotelPriority} style={{ padding: 0, overflow: 'hidden' }}>
@@ -268,9 +272,17 @@ function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, com
         <div style={{ display: 'flex', gap: 12 }}>
           {/* Vote column */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 38 }}>
-            <button onClick={() => onUpvote(act.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: M.red, lineHeight: 1 }}>▲</button>
+            <button
+              onClick={() => !hasVoted && onUpvote(act.id || act.activityId)}
+              title={hasVoted ? 'Already voted' : 'Upvote'}
+              style={{ background: 'none', border: 'none', cursor: hasVoted ? 'default' : 'pointer', fontSize: 22, color: hasVoted ? M.red : M.gray3, lineHeight: 1, opacity: hasVoted ? 1 : 0.7, transition: 'color 0.15s, opacity 0.15s' }}
+            >▲</button>
             <span style={{ fontWeight: 800, fontSize: 16, color: netVotes > 0 ? M.red : M.gray4, fontFamily: sans }}>{netVotes}</span>
-            <button onClick={() => onDownvote(act.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: M.gray3, lineHeight: 1 }}>▼</button>
+            <button
+              onClick={() => onDownvote(act.id || act.activityId)}
+              title="Downvote"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, color: M.gray3, lineHeight: 1, opacity: 0.7 }}
+            >▼</button>
           </div>
           {/* Main content */}
           <div style={{ flex: 1 }}>
@@ -286,12 +298,18 @@ function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, com
                   }
                 </div>
               </div>
-              {act.booked
-                ? <span style={{ background: '#e8f5e9', color: M.green, borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>✓ Booked</span>
-                : <button onClick={() => onBook && onBook(act.id)} style={{ background: M.red, color: M.white, border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontFamily: sans, fontSize: 12, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Book Now</button>
+              {bookedByMe
+                ? <span style={{ background: '#e8f5e9', color: M.green, borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>✓ You&apos;re booked</span>
+                : <button onClick={() => onBook && onBook(act.id || act.activityId)} style={{ background: M.red, color: M.white, border: 'none', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontFamily: sans, fontSize: 12, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>Book Now</button>
               }
             </div>
             <p style={{ fontSize: 13, color: M.gray5, lineHeight: 1.5, marginBottom: 8 }}>{act.description}</p>
+            {/* Booked-by list (other users) */}
+            {bookedBy.length > 0 && (
+              <div style={{ fontSize: 12, color: M.gray4, marginBottom: 6 }}>
+                🎟 Booked by: <strong style={{ color: M.gray5 }}>{bookedBy.join(', ')}</strong>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12, color: M.gray4 }}>
               <span>⏱ {act.duration}</span>
               {act.ageMin && <span>🔞 Ages {act.ageMin}+</span>}
@@ -341,29 +359,36 @@ function ActivityFeedCard({ act, onUpvote, onDownvote, onCommentAdd, onBook, com
                 </div>
               ))}
               <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                <input
-                  value={commentInputs[act.id] || ''}
-                  onChange={e => setCommentInputs(p => ({ ...p, [act.id]: e.target.value }))}
-                  placeholder="Add a comment..."
-                  style={{ flex: 1, padding: '8px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 20, fontFamily: sans, fontSize: 13, outline: 'none' }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && commentInputs[act.id]?.trim()) {
-                      onCommentAdd(act.id, commentInputs[act.id]);
-                      setCommentInputs(p => ({ ...p, [act.id]: '' }));
-                    }
-                  }}
-                />
-                <button
-                  onClick={() => {
-                    if (commentInputs[act.id]?.trim()) {
-                      onCommentAdd(act.id, commentInputs[act.id]);
-                      setCommentInputs(p => ({ ...p, [act.id]: '' }));
-                    }
-                  }}
-                  style={{ background: M.red, color: M.white, border: 'none', borderRadius: 20, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
-                >
-                  Post
-                </button>
+                {(() => {
+                  const actId = act.id || act.activityId;
+                  return (
+                    <>
+                      <input
+                        value={commentInputs[actId] || ''}
+                        onChange={e => setCommentInputs(p => ({ ...p, [actId]: e.target.value }))}
+                        placeholder="Add a comment..."
+                        style={{ flex: 1, padding: '8px 12px', border: `1.5px solid ${M.gray3}`, borderRadius: 20, fontFamily: sans, fontSize: 13, outline: 'none' }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && commentInputs[actId]?.trim()) {
+                            onCommentAdd(actId, commentInputs[actId]);
+                            setCommentInputs(p => ({ ...p, [actId]: '' }));
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          if (commentInputs[actId]?.trim()) {
+                            onCommentAdd(actId, commentInputs[actId]);
+                            setCommentInputs(p => ({ ...p, [actId]: '' }));
+                          }
+                        }}
+                        style={{ background: M.red, color: M.white, border: 'none', borderRadius: 20, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+                      >
+                        Post
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}

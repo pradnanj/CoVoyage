@@ -243,11 +243,11 @@ export default function OrganizerOnboarding({ onComplete }) {
       if (cancelled) return;
       if (!coords) {
         setHotelsError('Could not locate destination. Showing popular Marriott options.');
-        const fallback = await fetchMarriottHotels(28.5383, -81.3792);
+        const fallback = await fetchMarriottHotels(28.5383, -81.3792, 30, form.destination);
         if (!cancelled) { setHotels(fallback); setHotelsLoading(false); }
         return;
       }
-      const results = await fetchMarriottHotels(coords.lat, coords.lng);
+      const results = await fetchMarriottHotels(coords.lat, coords.lng, 30, form.destination);
       if (!cancelled) { setHotels(results); setHotelsLoading(false); }
     }).catch(() => {
       if (!cancelled) { setHotelsError('Could not load hotels. Please try again.'); setHotelsLoading(false); }

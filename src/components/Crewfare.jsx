@@ -91,7 +91,7 @@ export default function Crewfare() {
             const { fetchMarriottHotels } = await import('../services/marriottHotels.js');
             const coords = await geocodeCity(data.destination);
             if (coords) {
-              const fetched = await fetchMarriottHotels(coords.lat, coords.lng);
+              const fetched = await fetchMarriottHotels(coords.lat, coords.lng, 30, data.destination);
               if (fetched && fetched.length > 0) {
                 localStorage.setItem('crewfare_real_hotels', JSON.stringify(fetched));
                 setRealHotels(fetched);
@@ -157,38 +157,48 @@ export default function Crewfare() {
   // ── Activity actions ──────────────────────────────────────────────────────
   // Sort happens at render time — upvote/downvote just update counts
   const handleUpvote = (id) => {
-    const activity = activities.find(a => a.id === id);
-    if (activity) {
-      const voters = activity.voters.includes(currentUser) ? activity.voters : [...activity.voters, currentUser];
-      updateActivity(id, { upvotes: activity.upvotes + 1, voters });
-    }
+    const activity = activities.find(a => a.id === id || a.activityId === id);
+    if (!activity) return;
+    const voters = Array.isArray(activity.voters) ? activity.voters : [];
+    // Prevent double-voting
+    if (voters.includes(currentUser)) return;
+    updateActivity(id, {
+      upvotes: (activity.upvotes || 0) + 1,
+      voters: [...voters, currentUser],
+    });
   };
 
   const handleDownvote = (id) => {
-    const activity = activities.find(a => a.id === id);
-    if (activity) {
-      updateActivity(id, { downvotes: activity.downvotes + 1 });
-    }
+    const activity = activities.find(a => a.id === id || a.activityId === id);
+    if (!activity) return;
+    updateActivity(id, { downvotes: (activity.downvotes || 0) + 1 });
   };
 
   const handleCommentAdd = (id, text) => {
-    const activity = activities.find(a => a.id === id);
-    if (activity) {
-      updateActivity(id, { comments: [...activity.comments, { user: currentUser, text, time: 'just now' }] });
-    }
+    const activity = activities.find(a => a.id === id || a.activityId === id);
+    if (!activity || !text?.trim()) return;
+    const comments = Array.isArray(activity.comments) ? activity.comments : [];
+    updateActivity(id, {
+      comments: [...comments, { user: currentUser, text: text.trim(), time: 'just now' }],
+    });
   };
 
   const handleBook = (activity, date, time) => {
     if (!activity) return;
-    // Mark as booked in activities list
-    updateActivity(activity.id, { booked: true });
+    // Track booking per user — append currentUser to bookedBy array
+    const bookedBy = Array.isArray(activity.bookedBy) ? activity.bookedBy : [];
+    if (!bookedBy.includes(currentUser)) {
+      updateActivity(activity.id || activity.activityId, {
+        bookedBy: [...bookedBy, currentUser],
+      });
+    }
     // Add to itinerary on the selected date
     const newItem = {
-      id: `act-${activity.id}-${Date.now()}`,
+      id: `act-${activity.id || activity.activityId}-${Date.now()}`,
       title: activity.title,
       type: 'activity',
       time: time || '10:00 AM',
-      who: 'All',
+      who: currentUser || 'All',
       private: false,
       note: activity.description || '',
       emoji: activity.emoji || '✨',
@@ -813,7 +823,7 @@ function HotelsTab({ hotels: propHotels, members, onBookRoom, currentUser, tripI
     geocodeCity(destination).then(async coords => {
       if (cancelled) return;
       if (coords) {
-        const fetched = await fetchMarriottHotels(coords.lat, coords.lng);
+        const fetched = await fetchMarriottHotels(coords.lat, coords.lng, 30, destination);
         if (!cancelled && fetched && fetched.length > 0) {
           setLiveHotels(fetched);
           // Persist for Hotels tab persistence
