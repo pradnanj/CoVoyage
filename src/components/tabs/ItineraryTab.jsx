@@ -194,6 +194,7 @@ export default function ItineraryTab({ itinerary, members = [], tripInfo, onAddE
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 6 }}>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            {item.emoji && <span style={{ fontSize: 18 }}>{item.emoji}</span>}
                             <span style={{ fontWeight: 700, fontSize: 14, color: M.black }}>{item.title}</span>
                             {item.private && <span style={{ fontSize: 11, background: '#e8d5ff', color: '#6b21a8', borderRadius: 10, padding: '1px 8px', fontWeight: 600 }}>Private</span>}
                           </div>
@@ -202,6 +203,9 @@ export default function ItineraryTab({ itinerary, members = [], tripInfo, onAddE
                             <span>·</span>
                             <span>👥 {item.who}</span>
                           </div>
+                          {item.note && (
+                            <div style={{ marginTop: 6, fontSize: 13, color: M.gray5, lineHeight: 1.5 }}>{item.note}</div>
+                          )}
                         </div>
                         <div style={{ textAlign: 'right', flexShrink: 0 }}>
                           <div style={{ fontWeight: 700, fontSize: 13, color: M.black }}>{item.time}</div>

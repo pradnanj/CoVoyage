@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { M, sans, serif, TABS, ITINERARY, HOTELS, MEMBERS, TRIP, MOCK_PHOTOS } from '../constants.js';
+import { M, sans, serif, TABS, HOTELS, MEMBERS, TRIP, MOCK_PHOTOS } from '../constants.js';
 import { Av, SectionTitle, Tag, Card, PrimaryBtn, GhostBtn } from './shared.jsx';
 import OrganizerOnboarding from './OrganizerOnboarding.jsx';
 import AttendeeOnboarding from './AttendeeOnboarding.jsx';
@@ -10,7 +10,7 @@ import MemoriesTab from './tabs/MemoriesTab.jsx';
 import { useMembers, useHotels, useActivities } from '../hooks/useDatabase.js';
 import { geocodeCity } from '../services/locations.js';
 import { fetchMarriottHotels } from '../services/marriottHotels.js';
-import { saveTrip, getTrip, resetAllData } from '../services/database.js';
+import { saveTrip, getTrip, resetAllData, saveItinerary, getItinerary } from '../services/database.js';
 
 // Palette of colors for new attendees added dynamically
 const AVATAR_COLORS = ['#E91E63','#9C27B0','#3F51B5','#00BCD4','#FF5722','#795548','#607D8B','#FF9800'];
@@ -46,14 +46,24 @@ export default function Crewfare() {
   const logoClickTimer = useRef(null);
   const [itinerary, setItinerary] = useState(() => {
     try {
-      const saved = localStorage.getItem('crewfare_itinerary');
-      return saved ? JSON.parse(saved) : ITINERARY;
-    } catch { return ITINERARY; }
+      // Try trip-scoped key first, then fall back to legacy key
+      const urlTrip = new URLSearchParams(window.location.search).get('trip');
+      const scopedKey = urlTrip ? `crewfare_itinerary_${urlTrip}` : null;
+      const saved = (scopedKey && localStorage.getItem(scopedKey)) || localStorage.getItem('crewfare_itinerary');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
   });
 
-  // Persist itinerary to localStorage whenever it changes
+  // Persist itinerary to both localStorage and DynamoDB whenever it changes
+  const itineraryRef = useRef(itinerary);
+  itineraryRef.current = itinerary;
   useEffect(() => {
-    localStorage.setItem('crewfare_itinerary', JSON.stringify(itinerary));
+    // tripId may not be set yet on first render — read from URL directly
+    const urlTrip = new URLSearchParams(window.location.search).get('trip');
+    const tId = urlTrip || 'local';
+    localStorage.setItem(`crewfare_itinerary_${tId}`, JSON.stringify(itinerary));
+    if (urlTrip) saveItinerary(urlTrip, itinerary).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itinerary]);
 
   // Trip info set by organizer during onboarding
@@ -84,6 +94,11 @@ export default function Crewfare() {
         const loaded = { ...data, tripSlug: urlTripSlug };
         setTripInfo(loaded);
         localStorage.setItem(`crewfare_trip_${urlTripSlug}`, JSON.stringify(loaded));
+        // Load shared itinerary for this trip
+        try {
+          const saved = await getItinerary(urlTripSlug);
+          if (saved && saved.length > 0) setItinerary(saved);
+        } catch {}
         // Also fetch real hotels for this destination so the attendee sees the same hotels
         if (data.destination && !localStorage.getItem('crewfare_real_hotels')) {
           try {

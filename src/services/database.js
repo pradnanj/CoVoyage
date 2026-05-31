@@ -2,7 +2,7 @@
 // Uses localStorage by default, switches to DynamoDB when AWS credentials are provided
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 
 const AWS_ACCESS_KEY_ID = import.meta.env.VITE_AWS_ACCESS_KEY_ID;
 const AWS_SECRET_ACCESS_KEY = import.meta.env.VITE_AWS_SECRET_ACCESS_KEY;
@@ -187,11 +187,12 @@ export const getHotels = async (tripId) => {
 };
 
 // ───── ACTIVITIES OPERATIONS ───────────────────────────────────
+// saveActivity: full PUT — use for new activities
 export const saveActivity = async (tripId, activityData) => {
   const actId = activityData.id || activityData.activityId || `activity-${Date.now()}`;
   const activity = {
     activityId: actId,
-    id: actId,           // keep id in sync so the app can always find it by a.id
+    id: actId,
     tripId,
     ...activityData,
     createdAt: activityData.createdAt || new Date().toISOString(),
@@ -201,7 +202,7 @@ export const saveActivity = async (tripId, activityData) => {
     try {
       await docClient.send(new PutCommand({ TableName: "CrewfareActivities", Item: activity }));
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error.name);
+      console.error("DynamoDB saveActivity error, falling back to localStorage:", error.name);
       localStorage_save('activities', activity.activityId, activity, tripId);
     }
   } else {
@@ -210,16 +211,53 @@ export const saveActivity = async (tripId, activityData) => {
   return activity;
 };
 
+// updateActivityFields: partial UPDATE — only writes the specified fields, never replaces
+export const updateActivityFields = async (tripId, activityId, updates) => {
+  if (USE_DYNAMODB && docClient) {
+    try {
+      // Build a DynamoDB UpdateExpression from the updates object
+      const names = {};
+      const values = {};
+      const sets = [];
+      Object.entries(updates).forEach(([k, v], i) => {
+        // Skip DynamoDB key fields — they cannot be updated
+        if (k === 'activityId' || k === 'tripId') return;
+        const nameKey = `#f${i}`;
+        const valKey = `:v${i}`;
+        names[nameKey] = k;
+        values[valKey] = v;
+        sets.push(`${nameKey} = ${valKey}`);
+      });
+      if (sets.length === 0) return;
+      await docClient.send(new UpdateCommand({
+        TableName: "CrewfareActivities",
+        Key: { activityId, tripId },
+        UpdateExpression: `SET ${sets.join(', ')}`,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+      }));
+      return;
+    } catch (error) {
+      console.error("DynamoDB updateActivityFields error, falling back to localStorage:", error.name);
+    }
+  }
+  // localStorage fallback: read existing, merge, write back
+  const key = storageKey('activities', tripId);
+  const store = JSON.parse(window.localStorage.getItem(key) || '{}');
+  const existing = store[activityId] || {};
+  store[activityId] = { ...existing, ...updates, activityId, tripId, updatedAt: new Date().toISOString() };
+  window.localStorage.setItem(key, JSON.stringify(store));
+};
+
 export const getActivities = async (tripId) => {
   const normalise = (items) => items.map(a => ({
     ...a,
-    // Ensure id is always present regardless of which key DynamoDB returned
     id: a.id || a.activityId,
-    voters:   Array.isArray(a.voters)   ? a.voters   : [],
-    comments: Array.isArray(a.comments) ? a.comments : [],
+    voters:    Array.isArray(a.voters)    ? a.voters    : [],
+    comments:  Array.isArray(a.comments)  ? a.comments  : [],
     upvotes:   typeof a.upvotes   === 'number' ? a.upvotes   : 0,
     downvotes: typeof a.downvotes === 'number' ? a.downvotes : 0,
-    bookedBy:  Array.isArray(a.bookedBy) ? a.bookedBy : [],
+    bookedBy:  Array.isArray(a.bookedBy)  ? a.bookedBy  : [],
   }));
 
   if (USE_DYNAMODB && docClient) {
@@ -232,7 +270,7 @@ export const getActivities = async (tripId) => {
       }));
       return normalise(response.Items || []);
     } catch (error) {
-      console.error("DynamoDB error, falling back to localStorage:", error.name);
+      console.error("DynamoDB getActivities error, falling back to localStorage:", error.name);
       return normalise(localStorage_getAll('activities', tripId));
     }
   }
@@ -294,10 +332,50 @@ export const resetAllData = async () => {
   return { tables: results, rows: totalDeleted };
 };
 
+// ───── ITINERARY OPERATIONS ────────────────────────────────────
+// Stored as a field on the trip record (no extra table needed)
+export const saveItinerary = async (tripId, itinerary) => {
+  const key = `crewfare_itinerary_${tripId}`;
+  window.localStorage.setItem(key, JSON.stringify(itinerary));
+  if (USE_DYNAMODB && docClient) {
+    try {
+      await docClient.send(new UpdateCommand({
+        TableName: "CrewfareTrips",
+        Key: { tripId },
+        UpdateExpression: "SET #it = :it",
+        ExpressionAttributeNames: { "#it": "itinerary" },
+        ExpressionAttributeValues: { ":it": itinerary },
+      }));
+    } catch (error) {
+      console.error("DynamoDB saveItinerary error:", error.name);
+    }
+  }
+};
+
+export const getItinerary = async (tripId) => {
+  if (USE_DYNAMODB && docClient) {
+    try {
+      const response = await docClient.send(new GetCommand({
+        TableName: "CrewfareTrips",
+        Key: { tripId },
+        ProjectionExpression: "itinerary",
+      }));
+      if (response.Item?.itinerary) return response.Item.itinerary;
+    } catch (error) {
+      console.error("DynamoDB getItinerary error:", error.name);
+    }
+  }
+  try {
+    const saved = window.localStorage.getItem(`crewfare_itinerary_${tripId}`);
+    return saved ? JSON.parse(saved) : null;
+  } catch { return null; }
+};
+
 export default {
   saveTrip, getTrip,
   saveMember, getMembers,
   saveHotel, getHotels,
-  saveActivity, getActivities,
+  saveActivity, updateActivityFields, getActivities,
+  saveItinerary, getItinerary,
   resetAllData,
 };

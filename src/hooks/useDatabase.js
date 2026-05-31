@@ -3,7 +3,7 @@ import {
   saveTrip, getTrip,
   saveMember, getMembers,
   saveHotel, getHotels,
-  saveActivity, getActivities
+  saveActivity, updateActivityFields, getActivities
 } from '../services/database';
 import { MEMBERS, HOTELS } from '../constants';
 
@@ -223,21 +223,19 @@ export const useActivities = (tripId = null) => {
   }, [TRIP_ID]);
 
   const updateActivity = useCallback(async (activityId, updates) => {
+    // Optimistically update React state immediately
+    setActivities(prev => {
+      const next = prev.map(a =>
+        (a.id === activityId || a.activityId === activityId) ? { ...a, ...updates } : a
+      );
+      localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(next));
+      return next;
+    });
+    // Persist only the changed fields — never a full replace
     try {
-      const updated = { id: activityId, ...updates };
-      await saveActivity(TRIP_ID, updated);
-      setActivities(prev => {
-        const next = prev.map(a => (a.id === activityId || a.activityId === activityId) ? { ...a, ...updates } : a);
-        localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(next));
-        return next;
-      });
+      await updateActivityFields(TRIP_ID, activityId, updates);
     } catch (error) {
-      console.error('Failed to update activity:', error);
-      setActivities(prev => {
-        const next = prev.map(a => (a.id === activityId || a.activityId === activityId) ? { ...a, ...updates } : a);
-        localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(next));
-        return next;
-      });
+      console.error('Failed to persist activity update:', error);
     }
   }, [TRIP_ID]);
 
