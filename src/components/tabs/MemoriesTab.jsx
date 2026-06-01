@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { M, sans, serif } from "../../constants.js";
 import { SectionTitle, PrimaryBtn, GhostBtn, Tag } from "../shared.jsx";
+import { usePhotos } from "../../hooks/useDatabase.js";
 
 const TAGS = ["All", "Arrival", "Culture", "Adventure", "Food", "Family", "Music"];
 
@@ -212,33 +213,9 @@ function Postcard({ data, photos, tripInfo, onClose }) {
 }
 
 // ─── MEMORIES TAB ─────────────────────────────────────────────────────────────
-export default function MemoriesTab({ tripInfo, members = [] }) {
-  const [photos, setPhotos] = useState(() => {
-    try {
-      // Use trip-scoped key so memories are isolated per trip
-      const tripId = tripInfo?.tripSlug || new URLSearchParams(window.location.search).get('trip') || 'local';
-      const saved = localStorage.getItem(`crewfare_memories_${tripId}`);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return []; // start empty — no hardcoded placeholder photos
-  });
-
-  // Persist photos to localStorage under a trip-scoped key; strip large base64 srcs if quota is exceeded
-  useEffect(() => {
-    const tripId = tripInfo?.tripSlug || new URLSearchParams(window.location.search).get('trip') || 'local';
-    const key = `crewfare_memories_${tripId}`;
-    try {
-      localStorage.setItem(key, JSON.stringify(photos));
-    } catch {
-      try {
-        const stripped = photos.map(p => ({
-          ...p,
-          src: p.src?.startsWith('data:') ? undefined : p.src,
-        }));
-        localStorage.setItem(key, JSON.stringify(stripped));
-      } catch { /* ignore quota errors */ }
-    }
-  }, [photos, tripInfo?.tripSlug]);
+export default function MemoriesTab({ tripInfo, members = [], currentUser = '' }) {
+  const tripId = tripInfo?.tripSlug || new URLSearchParams(window.location.search).get('trip') || 'local';
+  const { photos, addPhoto, updatePhoto, removePhoto } = usePhotos(tripId);
   const [view, setView] = useState("grid");
   const [activeTag, setActiveTag] = useState("All");
   const [captioningId, setCaptioningId] = useState(null);
@@ -273,7 +250,7 @@ export default function MemoriesTab({ tripInfo, members = [] }) {
         const day = tripDayLabels.length > 0
           ? tripDayLabels[Math.floor(Math.random() * tripDayLabels.length)]
           : "Day 1";
-        setPhotos(prev => [...prev, {
+        addPhoto({
           id: "up_" + Date.now() + Math.random(),
           src: e.target.result,
           emoji: "📷",
@@ -283,7 +260,8 @@ export default function MemoriesTab({ tripInfo, members = [] }) {
           tag: tags[Math.floor(Math.random() * tags.length)],
           caption: null,
           selected: false,
-        }]);
+          uploadedBy: currentUser || tripInfo?.organizerName || 'crew',
+        });
       };
       reader.readAsDataURL(file);
     });
@@ -297,7 +275,7 @@ export default function MemoriesTab({ tripInfo, members = [] }) {
     setCaptioningId(photo.id);
     const fallback = `A moment worth remembering — ${photo.label}.`;
     const caption = (await claudeCaption(photo.label, photo.day, photo.tag, tripContext)) || fallback;
-    setPhotos(prev => prev.map(p => p.id === photo.id ? { ...p, caption } : p));
+    updatePhoto(photo.id, { caption });
     setCaptioningId(null);
   }
 
@@ -308,7 +286,7 @@ export default function MemoriesTab({ tripInfo, members = [] }) {
       setCaptioningId(photo.id);
       const fallback = `A moment worth remembering — ${photo.label}.`;
       const caption = (await claudeCaption(photo.label, photo.day, photo.tag, tripContext)) || fallback;
-      setPhotos(prev => prev.map(p => p.id === photo.id ? { ...p, caption } : p));
+      updatePhoto(photo.id, { caption });
       await new Promise(r => setTimeout(r, 300));
     }
     setCaptioningId(null);
@@ -323,7 +301,8 @@ export default function MemoriesTab({ tripInfo, members = [] }) {
   }
 
   function toggleSelect(id) {
-    setPhotos(prev => prev.map(p => p.id === id ? { ...p, selected: !p.selected } : p));
+    const photo = photos.find(p => p.id === id);
+    if (photo) updatePhoto(id, { selected: !photo.selected });
   }
 
   const selectedCount = photos.filter(p => p.selected).length;
@@ -443,6 +422,7 @@ export default function MemoriesTab({ tripInfo, members = [] }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
           {filtered.map((p, i) => {
             const isCapturing = captioningId === p.id;
+            const hasLocalSrc = !!p.src;
             return (
               <div
                 key={p.id}
@@ -464,12 +444,35 @@ export default function MemoriesTab({ tripInfo, members = [] }) {
                   {p.selected && "✓"}
                 </div>
 
+                {/* Delete button */}
+                <button
+                  onClick={() => removePhoto(p.id)}
+                  title="Remove photo"
+                  style={{ position: "absolute", top: 8, left: 8, zIndex: 10, background: "rgba(0,0,0,0.45)", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", color: M.white, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}
+                >✕</button>
+
                 {/* Photo area */}
-                <div style={{ height: 140, background: p.src ? "transparent" : p.color, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                  {p.src
+                <div style={{ height: 140, background: p.src ? "transparent" : (p.color || M.gray05), display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", position: "relative" }}>
+                  {hasLocalSrc
                     ? <img src={p.src} alt={p.label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    : <span style={{ fontSize: 44 }}>{p.emoji}</span>
+                    : (
+                      <div style={{ textAlign: "center", padding: "0 8px" }}>
+                        <div style={{ fontSize: 32, marginBottom: 4 }}>📷</div>
+                        <div style={{ fontFamily: sans, fontSize: 10, color: M.gray50 }}>
+                          Photo by {p.uploadedBy || "crew"}
+                        </div>
+                        <div style={{ fontFamily: sans, fontSize: 9, color: M.gray30, marginTop: 2 }}>
+                          View on their device
+                        </div>
+                      </div>
+                    )
                   }
+                  {/* Uploaded-by badge */}
+                  {p.uploadedBy && (
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.45)", padding: "3px 6px", fontFamily: sans, fontSize: 9, color: M.white, letterSpacing: ".03em" }}>
+                      📸 {p.uploadedBy}
+                    </div>
+                  )}
                 </div>
 
                 {/* Info */}

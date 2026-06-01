@@ -350,6 +350,97 @@ export const resetAllData = async () => {
 
 // ───── ITINERARY OPERATIONS ────────────────────────────────────
 // Stored as a field on the trip record (no extra table needed)
+// ───── EXPENSES OPERATIONS ─────────────────────────────────────
+// Expenses are stored as a single JSON attribute on the trip record,
+// mirroring the same pattern used for the itinerary.
+// ───── PHOTOS / MEMORIES OPERATIONS ──────────────────────────────────────
+// Strategy: metadata (id, label, day, tag, caption, uploadedBy, etc.) goes to DynamoDB.
+// The actual base64 src is stored in localStorage only (DynamoDB 400KB item limit).
+// Other users see metadata immediately; the src loads from their own localStorage if
+// they uploaded that photo, or shows a placeholder if they have not yet.
+
+// Strip src before sending to DynamoDB to stay under item size limits
+const photoMeta = (p) => {
+  const { src, ...meta } = p; // eslint-disable-line no-unused-vars
+  return meta;
+};
+
+export const savePhotos = async (tripId, photos) => {
+  const metaOnly = photos.map(photoMeta);
+  const key = `crewfare_photos_meta_${tripId}`;
+  window.localStorage.setItem(key, JSON.stringify(metaOnly));
+
+  if (USE_DYNAMODB && docClient) {
+    try {
+      await docClient.send(new UpdateCommand({
+        TableName: "CrewfareTrips",
+        Key: { tripId },
+        UpdateExpression: "SET #ph = :ph",
+        ExpressionAttributeNames: { "#ph": "photos" },
+        ExpressionAttributeValues: { ":ph": metaOnly },
+      }));
+    } catch (error) {
+      console.error("DynamoDB savePhotos error:", error.name);
+    }
+  }
+};
+
+export const getPhotos = async (tripId) => {
+  if (USE_DYNAMODB && docClient) {
+    try {
+      const response = await docClient.send(new GetCommand({
+        TableName: "CrewfareTrips",
+        Key: { tripId },
+        ProjectionExpression: "photos",
+      }));
+      if (response.Item?.photos) return response.Item.photos;
+    } catch (error) {
+      console.error("DynamoDB getPhotos error:", error.name);
+    }
+  }
+  try {
+    const saved = window.localStorage.getItem(`crewfare_photos_meta_${tripId}`);
+    return saved ? JSON.parse(saved) : [];
+  } catch { return []; }
+};
+
+export const saveExpenses = async (tripId, expenses) => {
+  const key = `crewfare_expenses_${tripId}`;
+  window.localStorage.setItem(key, JSON.stringify(expenses));
+  if (USE_DYNAMODB && docClient) {
+    try {
+      await docClient.send(new UpdateCommand({
+        TableName: "CrewfareTrips",
+        Key: { tripId },
+        UpdateExpression: "SET #ex = :ex",
+        ExpressionAttributeNames: { "#ex": "expenses" },
+        ExpressionAttributeValues: { ":ex": expenses },
+      }));
+    } catch (error) {
+      console.error("DynamoDB saveExpenses error:", error.name);
+    }
+  }
+};
+
+export const getExpenses = async (tripId) => {
+  if (USE_DYNAMODB && docClient) {
+    try {
+      const response = await docClient.send(new GetCommand({
+        TableName: "CrewfareTrips",
+        Key: { tripId },
+        ProjectionExpression: "expenses",
+      }));
+      if (response.Item?.expenses) return response.Item.expenses;
+    } catch (error) {
+      console.error("DynamoDB getExpenses error:", error.name);
+    }
+  }
+  try {
+    const saved = window.localStorage.getItem(`crewfare_expenses_${tripId}`);
+    return saved ? JSON.parse(saved) : [];
+  } catch { return []; }
+};
+
 export const saveItinerary = async (tripId, itinerary) => {
   const key = `crewfare_itinerary_${tripId}`;
   window.localStorage.setItem(key, JSON.stringify(itinerary));
@@ -392,6 +483,8 @@ export default {
   saveMember, getMembers,
   saveHotel, getHotels,
   saveActivity, updateActivityFields, getActivities,
+  savePhotos, getPhotos,
+  saveExpenses, getExpenses,
   saveItinerary, getItinerary,
   resetAllData,
 };
