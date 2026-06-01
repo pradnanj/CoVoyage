@@ -1,23 +1,8 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { M, sans, serif, TRIP, MOCK_PHOTOS } from "../../constants.js";
+import { useState, useRef, useEffect } from "react";
+import { M, sans, serif } from "../../constants.js";
 import { SectionTitle, PrimaryBtn, GhostBtn, Tag } from "../shared.jsx";
 
 const TAGS = ["All", "Arrival", "Culture", "Adventure", "Food", "Family", "Music"];
-
-const TRIP_HIGHLIGHTS = [
-  "Nashville Shores Water Park", "Broadway Honky Tonks", "Country Music Hall of Fame",
-  "Ryman Auditorium", "Arnold's Country Kitchen", "Group Bonfire at Percy Warner",
-];
-
-const FALLBACK_POSTCARD = {
-  headline: "Thirteen Hearts, One Music City",
-  subheadline: "Four families. Four nights. A lifetime of Nashville memories.",
-  story: "From the first honky tonk note on Broadway to the last splash at Nashville Shores, the Nashville Family Adventure of June 2026 was everything a family trip should be — loud, warm, sun-soaked, and full of moments we'll retell for years. Bharath gathered the crew, Priya found the best BBQ in town, Arjun won every trivia round, and Meera kept everyone on schedule (mostly). The Cumberland River sparkled as the General Jackson carried us into the evening, and the kids discovered that country music isn't just for grown-ups.",
-  bestMoment: "The whole crew — all thirteen of us — singing along to Sweet Home Alabama at a honky tonk on Broadway at 10pm on Saturday night.",
-  insiderTip: "The Bluebird Cafe seats only 90 people — show up 30 minutes early, order a round of drinks, and the kids are welcome before 9pm.",
-  closingLine: "Until the next adventure, crew. Bonvoy. 🎸",
-  hashtag: "#NashvilleCrew2026",
-};
 
 const ANTHROPIC_KEY = () => import.meta.env.VITE_ANTHROPIC_API_KEY || '';
 const ANTHROPIC_HEADERS = () => ({
@@ -27,7 +12,7 @@ const ANTHROPIC_HEADERS = () => ({
   "anthropic-dangerous-direct-browser-access": "true",
 });
 
-async function claudeCaption(label, day, tag) {
+async function claudeCaption(label, day, tag, tripContext) {
   if (!ANTHROPIC_KEY()) return null;
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -36,10 +21,10 @@ async function claudeCaption(label, day, tag) {
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
         max_tokens: 120,
-        system: `You write warm, specific, funny photo captions for family travel memories.
-Trip: Nashville TN, Jun 14–18 2026, 13 people across 4 families.
-Write ONE caption: 1–2 sentences, warm + specific to Nashville.
-No hashtags. No emojis. Sound like a real family memory, not a travel brochure.`,
+        system: `You write warm, specific, funny photo captions for group travel memories.
+Trip context: ${tripContext}
+Write ONE caption: 1–2 sentences, warm + specific to the destination and trip.
+No hashtags. No emojis. Sound like a real group memory, not a travel brochure.`,
         messages: [{ role: "user", content: `Photo: "${label}" taken on ${day}. Tag: ${tag}. Write the caption.` }],
       }),
     });
@@ -50,23 +35,29 @@ No hashtags. No emojis. Sound like a real family memory, not a travel brochure.`
   }
 }
 
-const FALLBACK_CAPTIONS = {
-  "Nashville Shores Water Park": "Three hours into the water park and nobody wanted to leave — even the dads who said they'd just watch from the deck.",
-  "Country Music Hall of Fame": "Forty-five minutes was never going to be enough. The kids found Dolly Parton's tour bus and refused to move on.",
-  "Arnold's Country Kitchen": "Meat-and-three for thirteen people, cash only, best meal of the entire trip. We came back the next day.",
-  "Ryman Auditorium Tour": "Standing on that stage, even just for a selfie, felt like something. The kids didn't quite get it. The adults absolutely did.",
-  "Broadway at Night": "Nobody told us Broadway would still be going at midnight. Nobody told the kids either — that was on us.",
-  "The Whole Crew at Sunset": "One photo. Thirteen people. Eight attempts. This was the one where everyone was actually looking.",
-};
+async function claudePostcard(photos, tripInfo, members) {
+  const destination = tripInfo?.destination || 'our destination';
+  const tripName = tripInfo?.name || 'Group Trip';
+  const dates = (tripInfo?.startDate && tripInfo?.endDate) ? `${tripInfo.startDate} – ${tripInfo.endDate}` : '';
+  const memberNames = (members || []).map(m => m.name).filter(Boolean);
 
-async function claudePostcard(photos) {
-  if (!ANTHROPIC_KEY()) return FALLBACK_POSTCARD;
+  // Build fallback from actual trip data
+  const fallback = {
+    headline: `${tripName}: Unforgettable Moments`,
+    subheadline: `A trip to remember in ${destination}.`,
+    story: `The crew came together for an incredible time in ${destination}${dates ? ` (${dates})` : ''}. Every moment was worth it — from arrival to the last goodbye.`,
+    bestMoment: `The whole group together, making memories that will last a lifetime.`,
+    insiderTip: `Always book ahead in ${destination} — the best spots fill up fast.`,
+    closingLine: `Until the next adventure. Bonvoy.`,
+    hashtag: `#${tripName.replace(/\s+/g, '')}`,
+  };
+
+  if (!ANTHROPIC_KEY()) return fallback;
+
   const captionSummaries = photos
     .filter(p => p.caption)
     .map(p => `"${p.label}": ${p.caption}`)
     .join("\n");
-
-  const memberNames = [];
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -75,21 +66,20 @@ async function claudePostcard(photos) {
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
         max_tokens: 500,
-        system: `You create warm, poetic trip memorabilia text for family travel scrapbooks. Write in editorial travel-memoir style — specific, evocative, personal.`,
+        system: `You create warm, poetic trip memorabilia text for group travel scrapbooks. Write in editorial travel-memoir style — specific, evocative, personal.`,
         messages: [{
           role: "user",
-          content: `Trip: ${tripInfo?.name || TRIP.name}, ${tripInfo?.startDate && tripInfo?.endDate ? `${tripInfo.startDate} – ${tripInfo.endDate}` : TRIP.dates}, ${tripInfo?.destination || TRIP.destination}
-Families: ${memberNames.join(", ")}
-Highlights: ${TRIP_HIGHLIGHTS.join(", ")}
-Photo moments:\n${captionSummaries}
+          content: `Trip: ${tripName}, ${dates}, ${destination}
+Members: ${memberNames.length > 0 ? memberNames.join(", ") : "the group"}
+Photo moments:\n${captionSummaries || "No captions yet — write from the trip details above."}
 
-Generate JSON:
+Generate JSON exactly:
 {
   "headline": "5–7 word poetic trip headline",
   "subheadline": "one evocative sentence",
-  "story": "3–4 sentences — specific moments and Nashville details",
+  "story": "3–4 sentences — specific moments and destination details",
   "bestMoment": "one sentence — the single best moment",
-  "insiderTip": "one Nashville insider tip the group discovered",
+  "insiderTip": "one destination insider tip the group discovered",
   "closingLine": "one warm closing line",
   "hashtag": "one custom trip hashtag"
 }`,
@@ -100,14 +90,14 @@ Generate JSON:
     const text = data.content?.[0]?.text || "";
     const match = text.match(/\{[\s\S]*\}/);
     if (match) return JSON.parse(match[0]);
-    return FALLBACK_POSTCARD;
+    return fallback;
   } catch {
-    return FALLBACK_POSTCARD;
+    return fallback;
   }
 }
 
 // ─── POSTCARD MODAL ───────────────────────────────────────────────────────────
-function Postcard({ data, photos, onClose }) {
+function Postcard({ data, photos, tripInfo, onClose }) {
   const postcardRef = useRef(null);
   const displayPhotos = [...photos.filter(p => p.selected), ...photos.filter(p => !p.selected)].slice(0, 6);
 
@@ -194,11 +184,11 @@ function Postcard({ data, photos, onClose }) {
             </div>
           </div>
 
-          {/* Highlights strip */}
+          {/* Highlights strip — built from actual uploaded photo labels */}
           <div style={{ background: M.gray05, padding: "14px 28px", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <span style={{ fontFamily: sans, fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: M.gray50, marginRight: 4 }}>Highlights</span>
-            {TRIP_HIGHLIGHTS.map(h => (
-              <Tag key={h} color={M.charcoal}>{h}</Tag>
+            {photos.slice(0, 8).map(p => (
+              <Tag key={p.id} color={M.charcoal}>{p.label}</Tag>
             ))}
           </div>
 
@@ -222,29 +212,33 @@ function Postcard({ data, photos, onClose }) {
 }
 
 // ─── MEMORIES TAB ─────────────────────────────────────────────────────────────
-export default function MemoriesTab({ tripInfo }) {
+export default function MemoriesTab({ tripInfo, members = [] }) {
   const [photos, setPhotos] = useState(() => {
     try {
-      const saved = localStorage.getItem('crewfare_memories');
+      // Use trip-scoped key so memories are isolated per trip
+      const tripId = tripInfo?.tripSlug || new URLSearchParams(window.location.search).get('trip') || 'local';
+      const saved = localStorage.getItem(`crewfare_memories_${tripId}`);
       if (saved) return JSON.parse(saved);
     } catch {}
-    return MOCK_PHOTOS;
+    return []; // start empty — no hardcoded placeholder photos
   });
 
-  // Persist photos to localStorage; strip large base64 srcs if quota is exceeded
+  // Persist photos to localStorage under a trip-scoped key; strip large base64 srcs if quota is exceeded
   useEffect(() => {
+    const tripId = tripInfo?.tripSlug || new URLSearchParams(window.location.search).get('trip') || 'local';
+    const key = `crewfare_memories_${tripId}`;
     try {
-      localStorage.setItem('crewfare_memories', JSON.stringify(photos));
+      localStorage.setItem(key, JSON.stringify(photos));
     } catch {
       try {
         const stripped = photos.map(p => ({
           ...p,
           src: p.src?.startsWith('data:') ? undefined : p.src,
         }));
-        localStorage.setItem('crewfare_memories', JSON.stringify(stripped));
-      } catch { /* ignore */ }
+        localStorage.setItem(key, JSON.stringify(stripped));
+      } catch { /* ignore quota errors */ }
     }
-  }, [photos]);
+  }, [photos, tripInfo?.tripSlug]);
   const [view, setView] = useState("grid");
   const [activeTag, setActiveTag] = useState("All");
   const [captioningId, setCaptioningId] = useState(null);
@@ -256,20 +250,36 @@ export default function MemoriesTab({ tripInfo }) {
 
   const filtered = activeTag === "All" ? photos : photos.filter(p => p.tag === activeTag);
 
+  // Generate trip day labels from tripInfo dates, or fall back to generic day labels
+  const tripDayLabels = (() => {
+    if (!tripInfo?.startISO || !tripInfo?.endISO) return [];
+    const days = [];
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const start = new Date(tripInfo.startISO + 'T00:00:00');
+    const end = new Date(tripInfo.endISO + 'T00:00:00');
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      days.push(`${dayNames[d.getDay()]}, ${monthNames[d.getMonth()]} ${d.getDate()}`);
+    }
+    return days;
+  })();
+
   function readFiles(files) {
     Array.from(files).forEach(file => {
       if (!file.type.startsWith("image/")) return;
       const reader = new FileReader();
       reader.onload = e => {
         const tags = ["Arrival", "Culture", "Adventure", "Food", "Family", "Music"];
-        const days = ["Jun 14", "Jun 15", "Jun 16", "Jun 17", "Jun 18"];
+        const day = tripDayLabels.length > 0
+          ? tripDayLabels[Math.floor(Math.random() * tripDayLabels.length)]
+          : "Day 1";
         setPhotos(prev => [...prev, {
           id: "up_" + Date.now() + Math.random(),
           src: e.target.result,
           emoji: "📷",
           color: M.gray05,
           label: file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " "),
-          day: days[Math.floor(Math.random() * days.length)],
+          day,
           tag: tags[Math.floor(Math.random() * tags.length)],
           caption: null,
           selected: false,
@@ -279,10 +289,14 @@ export default function MemoriesTab({ tripInfo }) {
     });
   }
 
+  const tripContext = tripInfo
+    ? `${tripInfo.name || 'Group Trip'}, ${tripInfo.destination || ''}, ${tripInfo.startDate || ''} – ${tripInfo.endDate || ''}`
+    : 'Group travel trip';
+
   async function captionOne(photo) {
     setCaptioningId(photo.id);
-    const fallback = FALLBACK_CAPTIONS[photo.label] || `One of those Nashville moments you can't quite put into words — but this photo gets close.`;
-    const caption = (await claudeCaption(photo.label, photo.day, photo.tag)) || fallback;
+    const fallback = `A moment worth remembering — ${photo.label}.`;
+    const caption = (await claudeCaption(photo.label, photo.day, photo.tag, tripContext)) || fallback;
     setPhotos(prev => prev.map(p => p.id === photo.id ? { ...p, caption } : p));
     setCaptioningId(null);
   }
@@ -292,8 +306,8 @@ export default function MemoriesTab({ tripInfo }) {
     const uncaptioned = photos.filter(p => !p.caption);
     for (const photo of uncaptioned) {
       setCaptioningId(photo.id);
-      const fallback = FALLBACK_CAPTIONS[photo.label] || `One of those Nashville moments you can't quite put into words — but this photo gets close.`;
-      const caption = (await claudeCaption(photo.label, photo.day, photo.tag)) || fallback;
+      const fallback = `A moment worth remembering — ${photo.label}.`;
+      const caption = (await claudeCaption(photo.label, photo.day, photo.tag, tripContext)) || fallback;
       setPhotos(prev => prev.map(p => p.id === photo.id ? { ...p, caption } : p));
       await new Promise(r => setTimeout(r, 300));
     }
@@ -303,7 +317,7 @@ export default function MemoriesTab({ tripInfo }) {
 
   async function generatePostcard() {
     setGeneratingPostcard(true);
-    const data = await claudePostcard(photos);
+    const data = await claudePostcard(photos, tripInfo, members);
     setPostcardData(data);
     setGeneratingPostcard(false);
   }
@@ -324,7 +338,7 @@ export default function MemoriesTab({ tripInfo }) {
       `}</style>
 
       {postcardData && (
-        <Postcard data={postcardData} photos={photos} onClose={() => setPostcardData(null)} />
+        <Postcard data={postcardData} photos={photos} tripInfo={tripInfo} onClose={() => setPostcardData(null)} />
       )}
 
       {/* Header actions */}

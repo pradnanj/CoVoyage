@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { M, sans, serif, TABS, HOTELS, MEMBERS, TRIP, MOCK_PHOTOS } from '../constants.js';
+import { M, sans, serif, TABS, HOTELS, MEMBERS, TRIP } from '../constants.js';
 import { Av, SectionTitle, Tag, Card, PrimaryBtn, GhostBtn } from './shared.jsx';
 import OrganizerOnboarding from './OrganizerOnboarding.jsx';
 import AttendeeOnboarding from './AttendeeOnboarding.jsx';
@@ -20,10 +20,11 @@ export default function Crewfare() {
   const params = new URLSearchParams(window.location.search);
   const isAttendeeLink = params.has('trip') && params.has('ref');
   const skipOnboarding = params.get('skip') === '1';
+  const urlTripParam = params.get('trip') || null; // present on both organizer (?skip=1) and attendee (?ref=) links
 
-  // Restore session from sessionStorage
-  const savedUser = sessionStorage.getItem('crewfare_user');
-  const savedView = sessionStorage.getItem('crewfare_view');
+  // Restore session — prefer sessionStorage (same tab), fall back to localStorage (cross-session)
+  const savedUser = sessionStorage.getItem('crewfare_user') || localStorage.getItem('crewfare_user_persistent') || null;
+  const savedView = sessionStorage.getItem('crewfare_view') || (savedUser && urlTripParam ? 'app' : null);
 
   // If no active session AND not joining via invite link, wipe stale localStorage data so we always start fresh
   if (!savedUser && !isAttendeeLink) {
@@ -66,24 +67,47 @@ export default function Crewfare() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itinerary]);
 
+  // Poll itinerary from DynamoDB every 15s so all users (including organizer) see bookings made by others
+  useEffect(() => {
+    const urlTrip = new URLSearchParams(window.location.search).get('trip');
+    if (!urlTrip) return;
+    const poll = async () => {
+      try {
+        const remote = await getItinerary(urlTrip);
+        if (!remote || remote.length === 0) return;
+        // Merge remote into local: remote wins for existing dates, local keeps dates not in remote
+        setItinerary(prev => {
+          const remoteByDate = Object.fromEntries(remote.map(d => [d.date, d]));
+          const merged = prev.map(d => remoteByDate[d.date] || d);
+          // add dates from remote not already in prev
+          remote.forEach(d => { if (!merged.find(m => m.date === d.date)) merged.push(d); });
+          // Only trigger re-render if something actually changed
+          return JSON.stringify(merged) !== JSON.stringify(prev) ? merged : prev;
+        });
+      } catch {}
+    };
+    const interval = setInterval(poll, 15000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Trip info set by organizer during onboarding
   const savedTrip = (() => { try { return JSON.parse(sessionStorage.getItem('crewfare_trip') || localStorage.getItem('crewfare_trip') || 'null'); } catch { return null; } })();
 
-  // If attendee arrived via invite link and we have their tripSlug but no full tripInfo yet,
-  // attempt to load it from localStorage keyed by tripSlug
-  const urlTripSlug = (() => { try { return new URLSearchParams(window.location.search).get('trip') || null; } catch { return null; } })();
+  // urlTripSlug is present for both organizer (?trip=slug&skip=1) and attendee (?trip=slug&ref=...)
+  const urlTripSlug = urlTripParam;
   const tripInfoFromSlug = (() => {
     if (!urlTripSlug) return null;
     try { return JSON.parse(localStorage.getItem(`crewfare_trip_${urlTripSlug}`) || 'null'); } catch { return null; }
   })();
 
   const [tripInfo, setTripInfo] = useState(savedTrip || tripInfoFromSlug || {
-    name: TRIP.name,
-    destination: TRIP.destination,
-    startDate: TRIP.startDate,
-    endDate: TRIP.endDate,
-    startISO: TRIP.startISO,
-    endISO: TRIP.endISO,
+    name: '',
+    destination: '',
+    startDate: '',
+    endDate: '',
+    startISO: '',
+    endISO: '',
   });
 
   // If attendee has a URL slug but no local trip info, try fetching from DB
@@ -279,6 +303,7 @@ export default function Crewfare() {
       setCurrentUser(name);
       sessionStorage.setItem('crewfare_user', name);
       sessionStorage.setItem('crewfare_view', 'app');
+      localStorage.setItem('crewfare_user_persistent', name); // cross-session fallback
       ['crewfare_members','crewfare_hotels','crewfare_activities'].forEach(k => localStorage.removeItem(k));
 
       // Save trip info from organizer's form
@@ -354,6 +379,7 @@ export default function Crewfare() {
         setCurrentUser(safeName);
         sessionStorage.setItem('crewfare_user', safeName);
         sessionStorage.setItem('crewfare_view', 'app');
+        localStorage.setItem('crewfare_user_persistent', safeName); // cross-session fallback
         if (hotelId) {
           await handleBookRoom(hotelId, safeName);
         } else {
@@ -409,6 +435,7 @@ export default function Crewfare() {
                 sessionStorage.removeItem('crewfare_user');
                 sessionStorage.removeItem('crewfare_view');
                 sessionStorage.removeItem('crewfare_trip');
+                localStorage.removeItem('crewfare_user_persistent');
                 window.location.href = window.location.origin + window.location.pathname;
               }}
               style={{ marginLeft: 6, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, color: M.white, fontSize: 11, fontWeight: 700, padding: '4px 8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -473,7 +500,7 @@ export default function Crewfare() {
           />
         )}
         {activeTab === 'expenses' && <ExpenseTab members={members} currentUser={currentUser} tripInfo={tripInfo} />}
-        {activeTab === 'memories' && <MemoriesTab photos={MOCK_PHOTOS} tripInfo={tripInfo} />}
+        {activeTab === 'memories' && <MemoriesTab tripInfo={tripInfo} members={members} />}
         {activeTab === 'invite' && <InviteTab members={members} tripInfo={tripInfo} />}
       </div>
 
