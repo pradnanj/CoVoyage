@@ -178,6 +178,11 @@ export const useHotels = (externalHotels = null, tripId = null) => {
 
   const [hotels, setHotels] = useState(() => {
     if (externalHotels && externalHotels.length > 0) return externalHotels;
+    // Try trip-scoped key first, then legacy global key
+    try {
+      const scoped = localStorage.getItem(`crewfare_real_hotels_${TRIP_ID}`);
+      if (scoped) { const p = JSON.parse(scoped); if (p?.length) return p; }
+    } catch {}
     return readHotelsFromStorage() || HOTELS;
   });
   const [loading, setLoading] = useState(true);
@@ -236,7 +241,8 @@ export const useHotels = (externalHotels = null, tripId = null) => {
     }
 
     const onStorage = (e) => {
-      if (e.key === 'crewfare_real_hotels' && e.newValue) {
+      // Listen to both scoped and legacy keys
+      if ((e.key === `crewfare_real_hotels_${TRIP_ID}` || e.key === 'crewfare_real_hotels') && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed) && parsed.length > 0) setHotels(parsed);
@@ -255,7 +261,8 @@ export const useHotels = (externalHotels = null, tripId = null) => {
   const updateHotel = useCallback(async (hotelId, updates) => {
     setHotels(prev => {
       const next = prev.map(h => h.id === hotelId ? { ...h, ...updates } : h);
-      localStorage.setItem('crewfare_real_hotels', JSON.stringify(next));
+      localStorage.setItem(`crewfare_real_hotels_${TRIP_ID}`, JSON.stringify(next));
+      localStorage.setItem('crewfare_real_hotels', JSON.stringify(next)); // legacy
       channelRef.current?.postMessage({ type: 'update', hotels: next });
       return next;
     });

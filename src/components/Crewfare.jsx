@@ -163,7 +163,8 @@ export default function Crewfare() {
           if (saved && saved.length > 0) setItinerary(saved);
         } catch {}
         // Also fetch real hotels for this destination so the attendee sees the same hotels
-        if (data.destination && !localStorage.getItem('crewfare_real_hotels')) {
+        const scopedKey = `crewfare_real_hotels_${urlTripSlug}`;
+        if (data.destination && !localStorage.getItem(scopedKey)) {
           try {
             const { geocodeCity } = await import('../services/locations.js');
             const { fetchMarriottHotels } = await import('../services/marriottHotels.js');
@@ -171,10 +172,17 @@ export default function Crewfare() {
             if (coords) {
               const fetched = await fetchMarriottHotels(coords.lat, coords.lng, 30, data.destination);
               if (fetched && fetched.length > 0) {
-                localStorage.setItem('crewfare_real_hotels', JSON.stringify(fetched));
-                setRealHotels(fetched);
+                const hotelsWithMeta = fetched.map((h, i) => ({ ...h, highlight: i === 0, bookedBy: h.bookedBy || [] }));
+                localStorage.setItem(scopedKey, JSON.stringify(hotelsWithMeta));
+                localStorage.setItem('crewfare_real_hotels', JSON.stringify(hotelsWithMeta));
+                setRealHotels(hotelsWithMeta);
               }
             }
+          } catch {}
+        } else if (data.destination) {
+          try {
+            const cached = JSON.parse(localStorage.getItem(scopedKey) || 'null');
+            if (cached && cached.length > 0) setRealHotels(cached);
           } catch {}
         }
       }
@@ -188,14 +196,56 @@ export default function Crewfare() {
   const { members, addMember, updateMember } = useMembers(tripId);
   const [realHotels, setRealHotels] = useState(() => {
     try {
-      const saved = localStorage.getItem('crewfare_real_hotels');
-      return saved ? JSON.parse(saved) : null;
+      // Try trip-scoped key first, then fall back to the legacy global key
+      const scopedKey = `crewfare_real_hotels_${tripId}`;
+      const scoped = localStorage.getItem(scopedKey);
+      if (scoped) return JSON.parse(scoped);
+      const legacy = localStorage.getItem('crewfare_real_hotels');
+      return legacy ? JSON.parse(legacy) : null;
     } catch { return null; }
   });
+  const [hotelsLoading, setHotelsLoading] = useState(false);
   const { hotels, updateHotel } = useHotels(realHotels, tripId);
   const { activities, addActivity, updateActivity } = useActivities(tripId);
 
   const [currentUser, setCurrentUser] = useState(savedUser || '');
+
+  // Re-fetch Marriott hotels whenever the destination or tripId changes.
+  // This is the single authoritative fetch — HotelsTab no longer fetches independently.
+  useEffect(() => {
+    const destination = tripInfo.destination;
+    if (!destination) return;
+    // Check if we already have hotels for this destination+trip
+    const cached = localStorage.getItem(`crewfare_real_hotels_${tripId}`);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (parsed && parsed.length > 0) {
+          setRealHotels(parsed);
+          return; // already have fresh data
+        }
+      } catch {}
+    }
+    let cancelled = false;
+    setHotelsLoading(true);
+    geocodeCity(destination).then(async coords => {
+      if (cancelled) return;
+      if (coords) {
+        const fetched = await fetchMarriottHotels(coords.lat, coords.lng, 30, destination);
+        if (!cancelled && fetched && fetched.length > 0) {
+          const hotelsWithMeta = fetched.map((h, i) => ({ ...h, highlight: i === 0, bookedBy: h.bookedBy || [] }));
+          setRealHotels(hotelsWithMeta);
+          try {
+            localStorage.setItem(`crewfare_real_hotels_${tripId}`, JSON.stringify(hotelsWithMeta));
+            localStorage.setItem('crewfare_real_hotels', JSON.stringify(hotelsWithMeta)); // legacy fallback
+          } catch {}
+        }
+      }
+      if (!cancelled) setHotelsLoading(false);
+    }).catch(() => { if (!cancelled) setHotelsLoading(false); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripInfo.destination, tripId]);
 
   // Book a room: add attendee name to hotel.bookedBy and update/add member record
   const handleBookRoom = async (hotelId, userName) => {
@@ -399,7 +449,8 @@ export default function Crewfare() {
           ...h, highlight: i === 0, tripId: newSlug,
           bookedBy: h.id === hotelId ? [name] : [],
         }));
-        localStorage.setItem(`crewfare_real_hotels`, JSON.stringify(allHotels));
+        localStorage.setItem(`crewfare_real_hotels_${newSlug}`, JSON.stringify(allHotels));
+        localStorage.setItem('crewfare_real_hotels', JSON.stringify(allHotels)); // legacy fallback
       }
 
       // Hard-redirect to ?trip=<slug>&skip=1 so ALL hooks reinitialise with the new tripId
@@ -523,7 +574,7 @@ export default function Crewfare() {
             onCommentAdd={handleCommentAdd}
           />
         )}
-        {activeTab === 'hotels' && <HotelsTab hotels={hotels} members={members} onBookRoom={handleBookRoom} currentUser={currentUser} tripInfo={tripInfo} />}
+        {activeTab === 'hotels' && <HotelsTab hotels={hotels} members={members} onBookRoom={handleBookRoom} currentUser={currentUser} tripInfo={tripInfo} hotelsLoading={hotelsLoading} />}
         {activeTab === 'activities' && (
           <ActivitiesTab
             activities={activities}
@@ -892,44 +943,14 @@ function ChooseRolePage({ onOrganizer, onAttendee, onBack }) {
 }
 
 // ─── Hotels Tab ───────────────────────────────────────────────────────────────
-function HotelsTab({ hotels: propHotels, members, onBookRoom, currentUser, tripInfo = {} }) {
+function HotelsTab({ hotels, members, onBookRoom, currentUser, tripInfo = {}, hotelsLoading = false }) {
   const [selectedHotel, setSelectedHotel] = useState(null);
   const [bookingStep, setBookingStep] = useState(0);
   const [bookerName, setBookerName] = useState('');
   const [confNum, setConfNum] = useState('');
-  const [liveHotels, setLiveHotels] = useState(propHotels);
-  const [hotelsLoading, setHotelsLoading] = useState(false);
 
-  const destination = tripInfo.destination || TRIP.destination;
+  const destination = tripInfo.destination || '';
 
-  // Fetch real Marriott hotels whenever destination changes
-  useEffect(() => {
-    if (!destination) return;
-    let cancelled = false;
-    setHotelsLoading(true);
-    geocodeCity(destination).then(async coords => {
-      if (cancelled) return;
-      if (coords) {
-        const fetched = await fetchMarriottHotels(coords.lat, coords.lng, 30, destination);
-        if (!cancelled && fetched && fetched.length > 0) {
-          setLiveHotels(fetched);
-          // Persist for Hotels tab persistence
-          try { localStorage.setItem('crewfare_real_hotels', JSON.stringify(fetched)); } catch {}
-        }
-      }
-      if (!cancelled) setHotelsLoading(false);
-    }).catch(() => { if (!cancelled) setHotelsLoading(false); });
-    return () => { cancelled = true; };
-  }, [destination]);
-
-  // Also reflect any externally-updated propHotels (e.g. from organizer onboarding)
-  useEffect(() => {
-    if (propHotels && propHotels.length > 0 && propHotels !== HOTELS) {
-      setLiveHotels(propHotels);
-    }
-  }, [propHotels]);
-
-  const hotels = liveHotels;
   const bookedRooms = hotels.reduce((acc, h) => acc + (h.bookedBy || []).length, 0);
 
   const discountRooms = tripInfo.discountRooms || TRIP.discountRooms;
