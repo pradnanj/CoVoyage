@@ -33,8 +33,9 @@ export default function ActivitiesTab({ activities, currentUser, tripInfo = {}, 
   const categories = ['All', ...new Set(activities.map(a => a.category))];
 
   const filtered = activities
+    .filter(a => a.title) // skip malformed/partial records
     .filter(a => filterCat === 'All' || a.category === filterCat)
-    .filter(a => !search || a.title.toLowerCase().includes(search.toLowerCase()) || a.description.toLowerCase().includes(search.toLowerCase()))
+    .filter(a => !search || (a.title || '').toLowerCase().includes(search.toLowerCase()) || (a.description || '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       if (sort === 'popular') return (b.upvotes - b.downvotes) - (a.upvotes - a.downvotes);
       if (sort === 'price-low') return a.price - b.price;

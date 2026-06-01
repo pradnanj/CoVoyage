@@ -212,11 +212,16 @@ export default function OrganizerOnboarding({ onComplete }) {
   const [hotelsLoading, setHotelsLoading] = useState(false);
   const [hotelsError, setHotelsError] = useState(null);
 
-  // Build a URL-safe trip slug from destination + year, e.g. "nashville-2026"
+  // Build a URL-safe trip slug from destination + year + short unique suffix, e.g. "nashville-2026-a3f"
   const tripSlug = (() => {
     const dest = (form.destination || 'trip').split(',')[0].trim().toLowerCase().replace(/\s+/g, '-');
     const year  = form.startDate ? form.startDate.slice(0, 4) : new Date().getFullYear();
-    return `${dest}-${year}`;
+    // Use a stable suffix derived from organizer name + destination so re-renders don't change it
+    const raw = `${form.organizerName || ''}${dest}`;
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+    const suffix = Math.abs(hash).toString(36).slice(0, 4);
+    return `${dest}-${year}-${suffix}`;
   })();
   const shareLink = `${window.location.origin}?trip=${tripSlug}&ref=organizer`;
 

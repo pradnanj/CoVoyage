@@ -38,10 +38,8 @@ export const useMembers = (tripId = null) => {
       if (data.length > 0) {
         setMembers(data);
         localStorage.setItem(`crewfare_members_${TRIP_ID}`, JSON.stringify(data));
-      } else if (!silent) {
-        setMembers([]);
-        localStorage.removeItem(`crewfare_members_${TRIP_ID}`);
       }
+      // Never clear state on empty DB response — could be a credential/connectivity issue
     } catch (error) {
       if (!silent) console.warn('Failed to load members, using cached:', error);
     } finally {
@@ -178,11 +176,9 @@ export const useActivities = (tripId = null) => {
       if (data.length > 0) {
         setActivities(data);
         localStorage.setItem(`crewfare_activities_${TRIP_ID}`, JSON.stringify(data));
-      } else if (!silent) {
-        // DB returned empty (after a reset) — clear local state too
-        setActivities([]);
-        localStorage.removeItem(`crewfare_activities_${TRIP_ID}`);
       }
+      // Never clear state when DB returns 0 rows — that could mean credentials are missing
+      // or the table is being repopulated. Only the explicit reset flow should clear activities.
     } catch (error) {
       if (!silent) console.warn('Failed to load activities from DB:', error);
     } finally {

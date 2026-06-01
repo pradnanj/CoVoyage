@@ -241,12 +241,28 @@ export const updateActivityFields = async (tripId, activityId, updates) => {
       console.error("DynamoDB updateActivityFields error, falling back to localStorage:", error.name);
     }
   }
-  // localStorage fallback: read existing, merge, write back
+  // localStorage fallback: read existing array, find and merge item, write back
   const key = storageKey('activities', tripId);
-  const store = JSON.parse(window.localStorage.getItem(key) || '{}');
-  const existing = store[activityId] || {};
-  store[activityId] = { ...existing, ...updates, activityId, tripId, updatedAt: new Date().toISOString() };
-  window.localStorage.setItem(key, JSON.stringify(store));
+  // useDatabase.js stores activities as an array; database.js localStorage_save stores as object-by-id.
+  // Handle both formats gracefully.
+  const raw = window.localStorage.getItem(key);
+  let store;
+  try { store = JSON.parse(raw || '[]'); } catch { store = []; }
+
+  if (Array.isArray(store)) {
+    // Array format (written by useDatabase.js hooks)
+    const next = store.map(item => {
+      const itemId = item.activityId || item.id;
+      if (itemId === activityId) return { ...item, ...updates, activityId: itemId, id: itemId, updatedAt: new Date().toISOString() };
+      return item;
+    });
+    window.localStorage.setItem(key, JSON.stringify(next));
+  } else {
+    // Object-by-id format (written by localStorage_save)
+    const existing = store[activityId] || {};
+    store[activityId] = { ...existing, ...updates, activityId, tripId, updatedAt: new Date().toISOString() };
+    window.localStorage.setItem(key, JSON.stringify(store));
+  }
 };
 
 export const getActivities = async (tripId) => {

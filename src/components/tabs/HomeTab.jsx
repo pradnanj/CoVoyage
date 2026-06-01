@@ -44,6 +44,7 @@ export default function HomeTab({ activities, hotels, members, tripInfo, onUpvot
 
   // Sort activities by net votes descending — reactively re-sorts on every vote
   const topActivities = [...activities]
+    .filter(a => a.title) // skip partial/malformed records
     .sort((a, b) => ((b.upvotes || 0) - (b.downvotes || 0)) - ((a.upvotes || 0) - (a.downvotes || 0)))
     .slice(0, 5);
 
