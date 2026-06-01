@@ -10,7 +10,7 @@ import MemoriesTab from './tabs/MemoriesTab.jsx';
 import { useMembers, useHotels, useActivities } from '../hooks/useDatabase.js';
 import { geocodeCity } from '../services/locations.js';
 import { fetchMarriottHotels } from '../services/marriottHotels.js';
-import { saveTrip, getTrip, resetAllData, saveItinerary, getItinerary } from '../services/database.js';
+import { saveTrip, getTrip, resetAllData, saveItinerary, getItinerary, saveMember, saveHotel } from '../services/database.js';
 
 // Palette of colors for new attendees added dynamically
 const AVATAR_COLORS = ['#E91E63','#9C27B0','#3F51B5','#00BCD4','#FF5722','#795548','#607D8B','#FF9800'];
@@ -329,32 +329,38 @@ export default function Crewfare() {
       localStorage.setItem('crewfare_trip', JSON.stringify(newTripInfo));
       // Also save under slug-specific key so attendees can load the plan via invite link
       localStorage.setItem(`crewfare_trip_${newTripInfo.tripSlug}`, JSON.stringify(newTripInfo));
-      // Persist trip to DynamoDB so attendees on other devices can load it
-      // Adopt real Marriott hotels fetched during onboarding
-      if (fetchedHotels && fetchedHotels.length > 0) {
-        const hotelsWithHighlight = fetchedHotels.map((h, i) => ({
-          ...h, highlight: i === 0, bookedBy: [],
-        }));
-        localStorage.setItem('crewfare_real_hotels', JSON.stringify(hotelsWithHighlight));
-      }
 
       // Save trip to DynamoDB so attendees on other devices can load it via invite link
       try { await saveTrip({ ...newTripInfo, tripId: newTripInfo.tripSlug, id: newTripInfo.tripSlug }); } catch (e) { console.warn('saveTrip failed:', e); }
 
-      // Persist organizer as member
+      // Persist organizer as member — use saveMember directly with the NEW slug
+      // (the hook's addMember still holds the old tripId at this point)
+      const newSlug = newTripInfo.tripSlug;
       const orgMember = {
         id: `m-org-${Date.now()}`, name,
         initials: name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase(),
         color: AVATAR_COLORS[0], role: 'organizer', hotel: hotelName, confirmed: true,
+        tripId: newSlug,
       };
-      try { await addMember(orgMember); } catch {}
+      try { await saveMember(newSlug, orgMember); } catch (e) { console.warn('saveMember failed:', e); }
+      // Pre-write to localStorage under the correct trip key so hooks load it immediately
+      localStorage.setItem(`crewfare_members_${newSlug}`, JSON.stringify([orgMember]));
 
-      // Persist organizer hotel booking
+      // Persist organizer hotel booking, and always write full hotel list for the Hotels tab
       if (hotelId) {
         const hotelObj = selectedHotel || HOTELS.find(h => h.id === hotelId);
         if (hotelObj) {
-          try { await updateHotel(hotelId, { ...hotelObj, bookedBy: [name] }); } catch {}
+          const bookedHotel = { ...hotelObj, bookedBy: [name], tripId: newSlug };
+          try { await saveHotel(newSlug, bookedHotel); } catch (e) { console.warn('saveHotel failed:', e); }
         }
+      }
+      // Always write the full fetched hotels list so Hotels tab loads immediately after redirect
+      if (fetchedHotels && fetchedHotels.length > 0) {
+        const allHotels = fetchedHotels.map((h, i) => ({
+          ...h, highlight: i === 0, tripId: newSlug,
+          bookedBy: h.id === hotelId ? [name] : [],
+        }));
+        localStorage.setItem(`crewfare_real_hotels`, JSON.stringify(allHotels));
       }
 
       // Hard-redirect to ?trip=<slug>&skip=1 so ALL hooks reinitialise with the new tripId
